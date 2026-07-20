@@ -18,17 +18,31 @@ const activeFrame = () => FRAMES.find(f => f.id === $("#target").value) || FRAME
 
 async function loadToken() {
   const t = await api.get("/api/token");
-  const el = $("#token");
-  if (t.expired) { el.className = "token err"; el.textContent = "Token expired — re-capture needed"; return; }
-  if (!t.expiresAt) { el.className = "token"; el.textContent = ""; return; }
+  const el = $("#token"), full = $("#tokenFull");
+  const setFull = (cls, txt) => { if (full) { full.className = "result " + cls; full.textContent = txt; } };
+  if (t.expired) {
+    el.className = "token err"; el.textContent = "Token expired";
+    setFull("err", "Token expired — the server will re-login automatically if your password is in config.local.json.");
+    return;
+  }
+  if (!t.expiresAt) { el.className = "token"; el.textContent = ""; setFull("", ""); return; }
   const days = Math.round((t.expiresAt - Date.now()) / 86400000);
   el.className = days <= 3 ? "token warn" : "token ok";
-  el.textContent = `Token valid ~${days} day(s)`;
+  el.textContent = `Token valid ~${days}d`;
+  setFull("ok", `Signed in · token valid ~${days} day(s), until ${new Date(t.expiresAt).toLocaleDateString()}.`);
 }
 
 let STATUS = {}, FW = {};
 // Merge the API's array-of-{frameId:val} into a flat {frameId:val} map.
 function flatten(arr) { const o = {}; (Array.isArray(arr) ? arr : []).forEach(x => Object.entries(x).forEach(([k, v]) => (o[k] = v))); return o; }
+
+let SELECTED = null;
+
+// Switch the visible view (Device / Library / Playlists / Settings).
+function showView(name) {
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("hidden", v.dataset.view !== name));
+  document.querySelectorAll(".navitem").forEach(n => n.classList.toggle("on", n.dataset.view === name));
+}
 
 async function loadFrames() {
   const [framesResp, statusResp, fwResp] = await Promise.all([
@@ -37,61 +51,128 @@ async function loadFrames() {
   FRAMES = framesResp.frames || [];
   STATUS = flatten(statusResp);
   FW = flatten(fwResp);
+  if (!FRAMES.find(f => f.id === SELECTED)) SELECTED = FRAMES[0]?.id || null;
 
-  const container = $("#frames");
-  if (!FRAMES.length) { container.innerHTML = '<p class="muted">No displays found.</p>'; return; }
-  container.innerHTML = FRAMES.map(frameCard).join("");
-  $("#target").innerHTML = FRAMES.map(f => `<option value="${f.id}">${esc(f.frameName)}</option>`).join("");
-  wireFrameHandlers(container);
+  renderSidebarDevices();
+  renderDevice();
+  renderPlaylists();
+  const tgt = $("#target");
+  if (tgt) { tgt.innerHTML = FRAMES.map(f => `<option value="${f.id}">${esc(f.frameName)}</option>`).join(""); if (SELECTED) tgt.value = SELECTED; }
 }
 
-function frameCard(f) {
+const selectedFrame = () => FRAMES.find(f => f.id === SELECTED) || FRAMES[0];
+
+// Sidebar list of displays (name, battery, link status). Click selects.
+function renderSidebarDevices() {
+  const el = $("#devlist"); if (!el) return;
+  if (!FRAMES.length) { el.innerHTML = `<div class="side-label">Displays</div><div class="muted small">None found</div>`; return; }
+  el.innerHTML = `<div class="side-label">Displays</div>` + FRAMES.map(f => {
+    const s = STATUS[f.id] || {};
+    const bat = s.batteryCapacity != null ? s.batteryCapacity + "%" : "—";
+    const link = s.wifiSignalStrength != null ? "on" : "off";
+    return `<button class="devitem ${f.id === SELECTED ? "on" : ""}" data-dev="${f.id}">
+      <span class="dot ${link}"></span>
+      <span class="dname">${esc(f.frameName)}</span>
+      <span class="dbat">${bat}${s.isCharging ? " ⚡" : ""}</span>
+    </button>`;
+  }).join("") + `<button class="devitem pair" title="Pairing a new frame still needs the phone app for now" disabled>+ Pair a device</button>`;
+  el.querySelectorAll("[data-dev]").forEach(b => b.addEventListener("click", () => {
+    SELECTED = b.dataset.dev; renderSidebarDevices(); renderDevice(); showView("device");
+  }));
+}
+
+// Sized style for the framed preview: correct aspect for the frame's orientation,
+// height-capped so tall portrait frames don't overflow and wide ones stay in-column.
+function mountStyle(f) {
+  const [a, b] = (f.displayResolution || "1600x2560").split("x").map(Number);
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  const [w, h] = f.orientation === "portrait" ? [lo, hi] : [hi, lo];
+  return `aspect-ratio:${w} / ${h}; width:min(100%, calc(58vh * ${(w / h).toFixed(4)}))`;
+}
+
+// The Device view: big framed current-artwork preview + all device controls.
+function renderDevice() {
+  const host = $("#device-detail"); if (!host) return;
+  const f = selectedFrame();
+  if (!f) {
+    host.innerHTML = `<div class="empty"><h1>No displays found</h1>
+      <p class="muted">Add your InkPoster email + password in <code>server/config.local.json</code> so the server can sign in, then reload.</p></div>`;
+    return;
+  }
   const s = STATUS[f.id] || {};
-  const battery = s.batteryCapacity != null ? s.batteryCapacity + "%" : "—";
-  const wifi = s.wifiSignalStrength != null ? s.wifiSignalStrength + "%" : "—";
-  const rot = (o) => `<button class="pill ${f.orientation === o ? "on" : ""}" data-rot="${f.id}" data-o="${o}">${o}</button>`;
-  return `
-  <div class="card" data-card="${f.id}">
-    ${nowShowing(f)}
-    <div class="stats">
-      <div class="stat battery"><div class="k">Battery${s.isCharging ? " ⚡" : ""}</div><div class="v" data-cell="battery-${f.id}">${battery}</div></div>
-      <div class="stat"><div class="k">Wi-Fi</div><div class="v" data-cell="wifi-${f.id}">${wifi}</div></div>
-      <div class="stat"><div class="k">Sync interval</div><div class="v">${fmtInterval(f.syncInterval)}</div></div>
-      <div class="stat"><div class="k">Free storage</div><div class="v" data-cell="storage-${f.id}">${fmtBytes(s.storageFreeVolume)}</div></div>
-      <div class="stat"><div class="k">Firmware</div><div class="v" data-cell="fw-${f.id}">${esc(s.firmwareVersion || "—")}</div></div>
-    </div>
-    <div class="progress hidden" data-progress="${f.id}"></div>
-    <div class="actions">
-      <span class="lbl">Orientation:</span> ${rot("landscape")} ${rot("portrait")}
-      <button data-sync="${f.id}">Sync now</button>
-      <button class="ghost" data-report="${f.id}">Refresh status</button>
-      <button class="ghost" data-refresh="${f.id}" title="Full-panel redraw to clear e-ink ghosting">Clear ghosting</button>
-      <label class="inline">Sync every
-        <select data-interval="${f.id}">${intervalOptions(f.syncInterval)}</select>
-      </label>
-    </div>
-    ${transitionRow(f)}
-    ${fwRow(f)}
-    ${slideshowRow(f)}
-    <div class="hint" data-hint="${f.id}"></div>
-  </div>`;
-}
-
-// "Now showing" — the current artwork's thumbnail + title/author (library items
-// carry this; private uploads only carry an id).
-function nowShowing(f) {
   const ci = f.currentItem || {};
   const title = ci.title || (ci.private ? "Your photo" : (ci.itemId ? "Untitled item" : "Nothing set"));
   const author = (ci.authors && (ci.authors[0]?.fullName || ci.authors[0]?.name)) || "";
-  return `
-    <div class="nowshow">
-      <div class="nowthumb">${ci.thumbnail ? `<img src="${esc(ci.thumbnail)}" alt="" loading="lazy" />` : `<span class="ph">no<br>preview</span>`}</div>
-      <div class="nowmeta">
-        <h3>${esc(f.frameName)}</h3>
-        <div class="sub">${esc(f.modelName)} · ${f.displayResolution} · ${f.orientation}</div>
-        <div class="now">Now showing: <b>${esc(title)}</b>${author ? " · " + esc(author) : ""}</div>
+  const battery = s.batteryCapacity != null ? s.batteryCapacity + "%" : "—";
+  const wifi = s.wifiSignalStrength != null ? s.wifiSignalStrength + "%" : "—";
+  const rot = (o) => `<button class="pill ${f.orientation === o ? "on" : ""}" data-rot="${f.id}" data-o="${o}">${o}</button>`;
+  host.innerHTML = `
+    <div class="stage-head">
+      <div>
+        <h1>${esc(f.frameName)}</h1>
+        <div class="statusline">
+          <span class="chip2 ${s.wifiSignalStrength != null ? "ok" : ""}">Wi-Fi · ${wifi}</span>
+          <span class="chip2">Battery ${battery}${s.isCharging ? " ⚡" : ""}</span>
+          <span class="chip2" data-cell="fw-${f.id}">${esc(s.firmwareVersion || "—")}</span>
+        </div>
+      </div>
+      <div class="head-actions">
+        <a class="btn" href="/modifier.html">Send a photo…</a>
+        <button class="ghost" data-report="${f.id}">Refresh</button>
+      </div>
+    </div>
+    <div class="device-grid">
+      <div class="hero">
+        <div class="frame-mount" style="${mountStyle(f)}">
+          ${ci.thumbnail ? `<img src="${esc(ci.thumbnail)}" alt="" />` : `<span class="ph">current artwork</span>`}
+        </div>
+        <div class="hero-cap">
+          <span class="muted">${f.orientation} · ${f.displayResolution} · ${esc(f.modelName)}</span>
+          <span class="now">Now showing: <b>${esc(title)}</b>${author ? " · " + esc(author) : ""}</span>
+        </div>
+        <div class="progress hidden" data-progress="${f.id}"></div>
+      </div>
+      <div class="side">
+        <div class="stats">
+          <div class="stat battery"><div class="k">Battery${s.isCharging ? " ⚡" : ""}</div><div class="v" data-cell="battery-${f.id}">${battery}</div></div>
+          <div class="stat"><div class="k">Wi-Fi</div><div class="v" data-cell="wifi-${f.id}">${wifi}</div></div>
+          <div class="stat"><div class="k">Free storage</div><div class="v" data-cell="storage-${f.id}">${fmtBytes(s.storageFreeVolume)}</div></div>
+          <div class="stat"><div class="k">Sync interval</div><div class="v">${fmtInterval(f.syncInterval)}</div></div>
+        </div>
+        <div class="actions"><span class="lbl">Orientation:</span> ${rot("landscape")} ${rot("portrait")}</div>
+        <div class="actions">
+          <button data-sync="${f.id}">Sync now</button>
+          <button class="ghost" data-refresh="${f.id}" title="Full-panel redraw to clear e-ink ghosting">Clear ghosting</button>
+          <label class="inline">Sync every <select data-interval="${f.id}">${intervalOptions(f.syncInterval)}</select></label>
+        </div>
+        ${transitionRow(f)}
+        ${fwRow(f)}
+        ${slideshowRow(f)}
+        <div class="hint" data-hint="${f.id}"></div>
       </div>
     </div>`;
+  wireFrameHandlers(host);
+}
+
+// Playlists view: existing slideshows on each frame (read-only for now).
+function renderPlaylists() {
+  const el = $("#playlists"); if (!el) return;
+  const withSs = FRAMES.filter(f => (f.slideshows || []).length);
+  if (!withSs.length) {
+    el.innerHTML = `<p class="muted">No slideshows yet. Creating playlists from here is a later update — for now this mirrors what's set in the phone app.</p>`;
+    return;
+  }
+  el.innerHTML = withSs.map(f => `
+    <div class="panel">
+      <h2>${esc(f.frameName)} <span class="muted">· every ${fmtInterval(f.slideshowInterval)}</span></h2>
+      ${(f.slideshows || []).map(ss => {
+        const on = ss.id === f.currentSlideshowId; const items = ss.items || [];
+        return `<div class="ss ${on ? "active" : ""}">
+          <div class="ss-head">${on ? "▶ active · " : ""}${items.length} slides · ${ss.orientation}${ss.shuffle ? " · shuffle" : ""}</div>
+          <div class="ss-thumbs">${items.slice(0, 16).map(i => `<span class="ss-thumb">${i.thumbnail ? `<img src="${esc(i.thumbnail)}" alt="" loading="lazy" />` : ""}</span>`).join("")}</div>
+        </div>`;
+      }).join("")}
+    </div>`).join("");
 }
 
 // Firmware row: shows an update banner (charging-gated) or an up-to-date line.
@@ -424,4 +505,5 @@ if ($("#bleScan")) {
   $("#bleReboot").addEventListener("click", (e) => bleAction("/api/ble/reboot", "Reboot", e.target));
 }
 
-(async () => { await loadFrames(); loadToken(); loadCategories(); bleInit(); startAutoPoll(); })();
+document.querySelectorAll(".navitem").forEach(n => n.addEventListener("click", () => showView(n.dataset.view)));
+(async () => { await loadFrames(); loadToken(); loadCategories(); bleInit(); startAutoPoll(); showView("device"); })();
