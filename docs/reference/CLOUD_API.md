@@ -341,10 +341,18 @@ Source: `FramesApi.smali` `@POST("item/show-on-frame")`, `ShowImagesOnFramesPro.
 This is the critical step that actually causes the image to be displayed.
 Without this call, the image is uploaded and converted but never assigned to the frame.
 
+#### POST /api/v1/item/upload-converted  (app's on-device path — not used here)
+
+The app has a second upload path: it converts the image to `.ntx` **on-device**
+using a native library (`com.inkposter.epaper_converter_android`, JNI) and uploads
+the finished `.ntx` here (response `AnswerUploadConverted(itemId=…)`). Because that
+converter is compiled native code, this project deliberately uses the server-side
+`/item/convert` path above instead. See `APK_ANALYSIS.md`.
+
 ### Complete image display flow
 
 1. Resize image to the frame's exact resolution (e.g. 2560x1440)
-2. `POST /item/convert` — upload the resized image
+2. `POST /item/convert` — upload the resized image (cloud does the `.ntx` conversion)
 3. `POST /item/is-converted` — poll until `status` is `converted`
 4. `POST /item/show-on-frame` — assign the converted item to the frame
 5. (Optional) Send BLE FETCH command (action=42) to trigger immediate display

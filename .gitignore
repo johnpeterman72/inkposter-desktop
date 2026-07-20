@@ -7,6 +7,10 @@ server/config.local.json
 # Local machine-specific Claude Code settings (permission allowlist, etc.)
 .claude/settings.local.json
 
+# Third-party reference repo kept locally only — do NOT redistribute (no license).
+# Attribution + link live in README.md and the reference docs.
+docs/reference/ha-inkposter-main/
+
 # Node
 node_modules/
 npm-debug.log*
