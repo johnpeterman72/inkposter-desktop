@@ -1,0 +1,12 @@
+# Secrets & captures (contain live auth tokens)
+docs/captures/*.har
+docs/captures/*.mitm
+server/config.local.json
+.env
+
+# Local machine-specific Claude Code settings (permission allowlist, etc.)
+.claude/settings.local.json
+
+# Node
+node_modules/
+npm-debug.log*

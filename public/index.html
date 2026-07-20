@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>InkPoster Desktop</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>InkPoster <span>Desktop</span></h1>
+    <div class="head-right">
+      <a class="navlink" href="/modifier.html">Upload a photo →</a>
+      <div id="token" class="token"></div>
+    </div>
+  </header>
+
+  <main>
+    <section id="frames" class="cards">
+      <p class="muted">Loading your displays…</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Art library</h2>
+        <label class="inline">Show on
+          <select id="target"></select>
+        </label>
+      </div>
+      <div id="cats" class="chips"><span class="muted">Loading categories…</span></div>
+      <div id="cards" class="grid"></div>
+      <div id="browseMsg" class="result"></div>
+    </section>
+
+    <details class="panel">
+      <summary>Advanced: show a specific item ID</summary>
+      <div class="row">
+        <label class="grow">Item ID
+          <input id="itemId" type="text" placeholder="e.g. 48c2c3d6-b734-418b-ab7e-6f4b78e87ecc" />
+        </label>
+        <button id="showBtn">Show on display</button>
+      </div>
+      <div id="showResult" class="result"></div>
+    </details>
+
+    <details class="panel">
+      <summary>Direct control over Bluetooth (beta)</summary>
+      <p class="muted">Talk to the frame directly over Bluetooth LE — no cloud sync wait. Needs a BLE
+        adapter and the <code>@stoprocent/noble</code> package installed on this PC. <b>Fetch now</b>
+        tells the frame to pull its latest assigned image immediately.</p>
+      <div id="bleUnavailable" class="result err hidden"></div>
+      <div class="row">
+        <button id="bleScan" class="ghost">Scan for frames</button>
+        <select id="bleDevice"><option value="">(scan first)</option></select>
+        <button id="bleStatus" class="ghost">Read status</button>
+      </div>
+      <div class="row">
+        <button id="bleFetch">Fetch now</button>
+        <button id="bleGhost" class="ghost">Ghosting clean</button>
+        <button id="bleReboot" class="ghost">Reboot</button>
+      </div>
+      <div id="bleMsg" class="result"></div>
+    </details>
+  </main>
+
+  <div id="preview" class="preview hidden">
+    <div class="preview-inner">
+      <img id="previewImg" alt="" />
+      <div class="preview-meta">
+        <h3 id="previewTitle"></h3>
+        <p id="previewSub" class="muted"></p>
+        <div class="preview-actions">
+          <button id="previewShow">Show on display</button>
+          <button id="previewClose" class="ghost">Cancel</button>
+        </div>
+        <div id="previewMsg" class="result"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

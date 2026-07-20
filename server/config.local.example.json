@@ -1,0 +1,10 @@
+{
+  "email": "you@example.com",
+  "password": "",
+  "deviceId": "00000000-0000-0000-0000-000000000000",
+  "country": "US",
+  "language": "en",
+  "userAgent": "InkposterApp Version:2.1.12 OS:iOS-26.5.2",
+
+  "_help": "Copy this file to config.local.json (gitignored) and fill it in. With email+password the server logs in and refreshes tokens automatically. deviceId is any UUID you generate once and keep. token/refreshToken are optional — the server writes them here after login, or you can paste a freshly captured token to skip the password login."
+}

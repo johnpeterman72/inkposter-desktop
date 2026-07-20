@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>InkPoster · Image Modifier</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>InkPoster <span>· Image Modifier</span></h1>
+    <a class="token ok" href="/" style="text-decoration:none">← Back to displays</a>
+  </header>
+
+  <main>
+    <section class="panel">
+      <p class="muted">Crop & size a photo to your display (<b id="dim">2560×1440</b>) and preview how it
+        will look on the 6-colour Spectra e-ink panel — using the app's own adjustment recipe
+        (<code>saturation +45, brightness −4, contrast +7, gamma 0.6</code>).
+        <b>Send to display</b> uploads the <em>adjusted</em> image (left preview); the frame's cloud
+        does its own e-ink conversion, so the dither view is just a preview.</p>
+
+      <div class="row">
+        <label>Photo <input id="file" type="file" accept="image/*" /></label>
+        <label>Display
+          <select id="frame"><option value="">Loading…</option></select>
+        </label>
+        <label>Orientation
+          <select id="orient">
+            <option value="landscape">Landscape 2560×1440</option>
+            <option value="portrait">Portrait 1440×2560</option>
+          </select>
+        </label>
+        <label>Fit
+          <select id="fit">
+            <option value="cover">Cover (crop to fill)</option>
+            <option value="contain">Contain (letterbox)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row">
+        <label>Saturation <input id="sat" type="range" min="-100" max="100" value="45" /></label>
+        <label>Brightness <input id="bri" type="range" min="-100" max="100" value="-4" /></label>
+        <label>Contrast <input id="con" type="range" min="-100" max="100" value="7" /></label>
+        <label>Gamma <input id="gam" type="range" min="30" max="200" value="60" /> <small class="muted">(÷100)</small></label>
+      </div>
+      <div class="row">
+        <label class="inline"><input id="eink" type="checkbox" checked /> Simulate e-ink palette (dither)</label>
+        <button id="send" disabled>Send to display</button>
+        <button id="download" class="ghost" disabled>Download processed PNG</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="compare">
+        <figure><figcaption>Adjusted</figcaption><canvas id="adj"></canvas></figure>
+        <figure><figcaption>E-ink preview</figcaption><canvas id="eout"></canvas></figure>
+      </div>
+      <p id="msg" class="muted">Choose a photo to begin.</p>
+    </section>
+  </main>
+  <script src="/modifier.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "inkposter-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local web app to control an InkPoster e-ink display from the desktop.",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "optionalDependencies": {
+    "@stoprocent/noble": "^2.0.0"
+  }
+}
