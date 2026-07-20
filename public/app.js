@@ -141,7 +141,7 @@ function renderDevice() {
         <div class="progress hidden" data-progress="${f.id}"></div>
       </div>
       <div class="side">
-        <div class="sendcard">
+        <div class="sendcard" id="sendcard">
           <div class="drop" id="dropzone">
             <b>Send new artwork</b>
             <span class="muted small">Drop a photo or <label class="link">browse<input type="file" id="quickfile" accept="image/*" hidden></label></span>
@@ -172,10 +172,14 @@ function renderDevice() {
 }
 
 // --- Inline "quick send": drop/pick a photo, resize to the frame, push ---
+let UPLOAD = null; // { img, deg }
+// Panels the app rotates 180° before conversion (else images land upside-down).
+const needs180 = (f) => !!f && f.modelAlias === "sharp_28_5";
+
 function wireQuickSend(f) {
   const file = $("#quickfile"), drop = $("#dropzone");
   if (!file) return;
-  const handle = (fl) => { if (fl) quickSend(f, fl); };
+  const handle = (fl) => { if (fl) startQuickSend(f, fl); };
   file.addEventListener("change", e => handle(e.target.files[0]));
   if (drop) {
     ["dragover", "dragenter"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
@@ -184,66 +188,89 @@ function wireQuickSend(f) {
   }
 }
 
-async function quickSend(f, file) {
-  const msg = $("#quickMsg");
-  msg.className = "result"; msg.textContent = "Preparing image…";
-  try {
-    const blob = await resizeToFrame(file, f);
-    msg.textContent = "Uploading & converting on the cloud (~10–30s)…";
-    const res = await fetch(`/api/upload?frame=${encodeURIComponent(f.id)}&name=photo.jpg`, {
-      method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `upload failed (${res.status})`);
-    msg.className = "result ok"; msg.textContent = "Sent! Delivering to the display…";
-    pollProgress(f.id);
-    setTimeout(loadFrames, 1600);
-  } catch (e) { msg.className = "result err"; msg.textContent = "Error: " + e.message; }
+// Load the photo and show a preview with rotate/push (no blind pushes).
+function startQuickSend(f, file) {
+  const img = new Image();
+  img.onload = () => { URL.revokeObjectURL(img.src); UPLOAD = { img, deg: needs180(f) ? 180 : 0 }; showUploadPreview(f); };
+  img.onerror = () => alert("Could not read that image.");
+  img.src = URL.createObjectURL(file);
 }
 
-// Panels the app rotates 180° before conversion (else images land upside-down).
-const needs180 = (f) => !!f && f.modelAlias === "sharp_28_5";
+function showUploadPreview(f) {
+  const card = $("#sendcard"); if (!card || !UPLOAD) return;
+  card.innerHTML = `
+    <div class="uprev"><canvas id="uprevCanvas"></canvas></div>
+    <div class="row" style="justify-content:center">
+      <button class="ghost" id="urotate">Rotate 90°</button>
+      <button id="upush">Push to display</button>
+      <button class="ghost" id="ucancel">Cancel</button>
+    </div>
+    <div id="quickMsg" class="result"></div>`;
+  drawUploadPreview(f);
+  $("#urotate").addEventListener("click", () => { UPLOAD.deg = (UPLOAD.deg + 90) % 360; drawUploadPreview(f); });
+  $("#upush").addEventListener("click", () => pushUpload(f));
+  $("#ucancel").addEventListener("click", () => { UPLOAD = null; renderDevice(); });
+}
 
-// Cover-crop an image to the frame's exact resolution/orientation, apply the
-// app's e-ink adjustment recipe, and return a JPEG blob (cloud does .ntx).
-function resizeToFrame(file, f) {
-  return new Promise((resolve, reject) => {
-    const [a, b] = (f.displayResolution || "1600x2560").split("x").map(Number);
-    const lo = Math.min(a, b), hi = Math.max(a, b);
-    const [W, H] = f.orientation === "portrait" ? [lo, hi] : [hi, lo];
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(img.src);
-      const c = document.createElement("canvas"); c.width = W; c.height = H;
-      const ctx = c.getContext("2d");
-      ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
-      const ir = img.width / img.height, tr = W / H; let dw, dh;
-      if (ir > tr) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
-      ctx.imageSmoothingQuality = "high";
-      // The 28.5" (sharp_28_5) panel mounts inverted — the official app rotates
-      // 180° before conversion, so match that or the image lands upside-down.
-      const flip = needs180(f);
-      if (flip) { ctx.translate(W, H); ctx.rotate(Math.PI); }
-      ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
-      if (flip) ctx.setTransform(1, 0, 0, 1, 0, 0);
-      const id = ctx.getImageData(0, 0, W, H);
-      const d = id.data, sat = 1.45, bri = -4 * 2.55, con = 0.07, cf = (1 + con) / (1 - con), gamma = 0.6;
-      const cl = (v) => v < 0 ? 0 : v > 255 ? 255 : v, c01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
-      for (let i = 0; i < d.length; i += 4) {
-        let r = d[i] + bri, g = d[i + 1] + bri, bl = d[i + 2] + bri;
-        r = cf * (r - 128) + 128; g = cf * (g - 128) + 128; bl = cf * (bl - 128) + 128;
-        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
-        r = lum + (r - lum) * sat; g = lum + (g - lum) * sat; bl = lum + (bl - lum) * sat;
-        d[i] = cl(255 * Math.pow(c01(r / 255), gamma));
-        d[i + 1] = cl(255 * Math.pow(c01(g / 255), gamma));
-        d[i + 2] = cl(255 * Math.pow(c01(bl / 255), gamma));
-      }
-      ctx.putImageData(id, 0, 0);
-      c.toBlob(bl => bl ? resolve(bl) : reject(new Error("encode failed")), "image/jpeg", 0.92);
-    };
-    img.onerror = () => reject(new Error("could not read that image"));
-    img.src = URL.createObjectURL(file);
-  });
+function drawUploadPreview(f) {
+  const dst = $("#uprevCanvas"); if (!dst || !UPLOAD) return;
+  const full = processToCanvas(UPLOAD.img, f, UPLOAD.deg);
+  const maxW = 300, scale = Math.min(1, maxW / full.width);
+  dst.width = Math.round(full.width * scale); dst.height = Math.round(full.height * scale);
+  const ctx = dst.getContext("2d"); ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(full, 0, 0, dst.width, dst.height);
+}
+
+async function pushUpload(f) {
+  const msg = $("#quickMsg");
+  $("#upush").disabled = true; $("#urotate").disabled = true;
+  msg.className = "result"; msg.textContent = "Uploading & converting on the cloud (~10–30s)…";
+  try {
+    const full = processToCanvas(UPLOAD.img, f, UPLOAD.deg);
+    const blob = await new Promise((res, rej) => full.toBlob(b => b ? res(b) : rej(new Error("encode failed")), "image/jpeg", 0.92));
+    const r = await fetch(`/api/upload?frame=${encodeURIComponent(f.id)}&name=photo.jpg`, {
+      method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `upload failed (${r.status})`);
+    msg.className = "result ok"; msg.textContent = "Sent! Delivering to the display…";
+    UPLOAD = null;
+    pollProgress(f.id);
+    setTimeout(loadFrames, 1600);
+  } catch (e) { msg.className = "result err"; msg.textContent = "Error: " + e.message; $("#upush").disabled = false; $("#urotate").disabled = false; }
+}
+
+// Cover-crop + rotate an image onto the frame's exact resolution, apply the
+// app's e-ink adjustment recipe. Returns a full-res canvas (cloud does .ntx).
+function processToCanvas(img, f, deg) {
+  const [a, b] = (f.displayResolution || "1600x2560").split("x").map(Number);
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  const [W, H] = f.orientation === "portrait" ? [lo, hi] : [hi, lo];
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  const swap = deg === 90 || deg === 270;
+  const tw = swap ? H : W, th = swap ? W : H;
+  const ir = img.width / img.height, tr = tw / th; let dw, dh;
+  if (ir > tr) { dh = th; dw = th * ir; } else { dw = tw; dh = tw / ir; }
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate(deg * Math.PI / 180);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
+  const id = ctx.getImageData(0, 0, W, H);
+  const d = id.data, sat = 1.45, bri = -4 * 2.55, con = 0.07, cf = (1 + con) / (1 - con), gamma = 0.6;
+  const cl = (v) => v < 0 ? 0 : v > 255 ? 255 : v, c01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i] + bri, g = d[i + 1] + bri, bl = d[i + 2] + bri;
+    r = cf * (r - 128) + 128; g = cf * (g - 128) + 128; bl = cf * (bl - 128) + 128;
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+    r = lum + (r - lum) * sat; g = lum + (g - lum) * sat; bl = lum + (bl - lum) * sat;
+    d[i] = cl(255 * Math.pow(c01(r / 255), gamma));
+    d[i + 1] = cl(255 * Math.pow(c01(g / 255), gamma));
+    d[i + 2] = cl(255 * Math.pow(c01(bl / 255), gamma));
+  }
+  ctx.putImageData(id, 0, 0);
+  return c;
 }
 
 // Playlists view: a builder (from the Library draft) + existing slideshows.

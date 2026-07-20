@@ -211,6 +211,8 @@ details.panel[open] summary { margin-bottom: 8px; }
 .drop b { font-size: 14px; }
 .link { color: var(--accent); cursor: pointer; text-decoration: underline; }
 .drop a { color: var(--accent); }
+.uprev { display: flex; justify-content: center; margin-bottom: 10px; }
+.uprev canvas { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #000; }
 
 /* Playlists */
 .ss { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 10px; }

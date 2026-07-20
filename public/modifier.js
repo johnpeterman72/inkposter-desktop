@@ -42,15 +42,18 @@ function drawFitted(srcCanvasCtx, W, H) {
   ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
   const ir = img.width / img.height, tr = W / H;
   let dw, dh;
+  const deg = +($("#rot") ? $("#rot").value : 0);
+  const swap = deg === 90 || deg === 270;
+  const tw = swap ? H : W, th = swap ? W : H; // target dims in the image's frame of reference
+  const irr = ir, trr = tw / th;
   const cover = $("#fit").value === "cover";
-  if ((ir > tr) === cover) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
+  if ((irr > trr) === cover) { dh = th; dw = th * irr; } else { dw = tw; dh = tw / irr; }
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate(deg * Math.PI / 180);
   ctx.imageSmoothingQuality = "high";
-  // The 28.5" (sharp_28_5) mounts inverted — rotate 180° like the official app.
-  const f = FRAMES.find((x) => x.id === ($("#frame") && $("#frame").value));
-  const flip = f && f.modelAlias === "sharp_28_5";
-  if (flip) { ctx.translate(W, H); ctx.rotate(Math.PI); }
-  ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
-  if (flip) ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
   return { c, ctx };
 }
 
@@ -201,6 +204,9 @@ async function loadFrames() {
 function syncOrientToFrame() {
   const f = FRAMES.find((x) => x.id === $("#frame").value);
   if (f && f.orientation) $("#orient").value = f.orientation;
+  // Sensible default: the 28.5" mounts inverted, so start at 180° (overridable
+  // live in the preview). Every other frame starts at 0°.
+  if ($("#rot")) $("#rot").value = (f && f.modelAlias === "sharp_28_5") ? "180" : "0";
   render();
 }
 
@@ -211,7 +217,7 @@ $("#file").addEventListener("change", (e) => {
   img.onload = () => { URL.revokeObjectURL(url); render(); };
   img.src = url;
 });
-["orient", "fit", "sat", "bri", "con", "gam", "eink"].forEach(id =>
+["orient", "fit", "rot", "sat", "bri", "con", "gam", "eink"].forEach(id =>
   $("#" + id).addEventListener("input", render));
 $("#frame").addEventListener("change", syncOrientToFrame);
 $("#download").addEventListener("click", () => {
