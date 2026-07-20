@@ -71,3 +71,16 @@ docs/captures/ Raw captures — SECRET (contain live tokens), gitignored
 server/        Local Node backend: index.js (http), inkposter.js (API client)
 public/        Browser UI (index.html / app.js / style.css)
 ```
+
+## Credits
+
+The cloud-API auth flow (HMAC login + refresh), the reference API client
+(`docs/reference/ha-inkposter-api_client.py`), and the BLE command protocol
+(`docs/reference/BLE_PROTOCOL.md`) were derived from **mcuelenaere**'s Home
+Assistant integration:
+
+- <https://github.com/mcuelenaere/ha-inkposter>
+
+Huge thanks for the reverse-engineering groundwork. That project carries no
+license at the time of writing, so treat its code as the author's — this
+repo re-implements the flow independently for a different (Node/browser) stack.

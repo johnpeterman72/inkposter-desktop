@@ -2,6 +2,11 @@
 
 Handles authentication (login + token refresh with HMAC-SHA256 signing),
 frame listing, status polling, image upload/conversion, and frame actions.
+
+SOURCE / CREDIT: kept here for reference only. From mcuelenaere's Home Assistant
+integration — https://github.com/mcuelenaere/ha-inkposter (no license stated at
+time of copy; retained under the original author's rights). This project's own
+Node client (server/inkposter.js) is an independent re-implementation.
 """
 
 from __future__ import annotations

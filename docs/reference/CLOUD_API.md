@@ -2,7 +2,8 @@
 
 This document describes the InkPoster HTTP API (`api.inkposter.com`),
 reverse-engineered from the Android APK and validated via Proxyman captures
-and the ha-inkposter Home Assistant integration.
+and the ha-inkposter Home Assistant integration by mcuelenaere:
+<https://github.com/mcuelenaere/ha-inkposter>.
 
 See also `BLE_PROTOCOL.md` for the Bluetooth protocol.
 

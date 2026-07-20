@@ -3,7 +3,8 @@
 This document is derived from the decompiled Android APK sources (smali + jadx),
 the `BleCommandSender`, `BleFrameInitializeHelper`, `BleScanner`, `BleInkPosterStatusKt`,
 and `BleCommands` classes, and validated against a real device via the ha-inkposter
-Home Assistant integration.
+Home Assistant integration by mcuelenaere:
+<https://github.com/mcuelenaere/ha-inkposter>.
 
 ## Device discovery
 
