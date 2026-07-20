@@ -70,7 +70,11 @@ function waitPoweredOn(timeoutMs = 6000) {
 }
 
 // Scan for InkP-* devices. Returns [{ id, name, rssi }].
-async function scan(durationMs = 5000) {
+// NOTE: must be an ACTIVE scan (allowDuplicates=true) — on Windows/WinRT the
+// device name arrives in the scan *response*, which passive scans never fetch,
+// so a passive scan sees the frame only as an unnamed address. E-ink frames
+// also advertise slowly, so scan for a good while (name can take ~10s to appear).
+async function scan(durationMs = 13000) {
   const n = noble();
   await waitPoweredOn();
   const found = new Map();
@@ -81,15 +85,16 @@ async function scan(durationMs = 5000) {
     }
   };
   n.on("discover", onDiscover);
-  await n.startScanningAsync([], false);
+  await n.startScanningAsync([], true);
   await sleep(durationMs);
   await n.stopScanningAsync();
   n.removeListener("discover", onDiscover);
   return [...found.values()];
 }
 
-// Find a peripheral: by id, by name, or the first InkP-* seen.
-async function findPeripheral({ id, name } = {}, timeoutMs = 8000) {
+// Find a peripheral: by id, by name, or the first InkP-* seen. Active scan +
+// generous timeout (the frame's name can take ~10s to advertise on Windows).
+async function findPeripheral({ id, name } = {}, timeoutMs = 18000) {
   const n = noble();
   await waitPoweredOn();
   return new Promise(async (resolve, reject) => {
@@ -100,12 +105,15 @@ async function findPeripheral({ id, name } = {}, timeoutMs = 8000) {
     const onDiscover = (p) => {
       const nm = p.advertisement && p.advertisement.localName;
       if (id && p.id !== id) return;
-      if (name && nm !== name) return;
-      if (!id && !name && !(nm && nm.startsWith(NAME_PREFIX))) return;
+      // match by id OR by advertised name; when neither is given, first InkP-*
+      if (!id) {
+        if (name && nm !== name) return;
+        if (!name && !(nm && nm.startsWith(NAME_PREFIX))) return;
+      }
       finish(resolve, p);
     };
     n.on("discover", onDiscover);
-    try { await n.startScanningAsync([], false); }
+    try { await n.startScanningAsync([], true); }
     catch (e) { finish(reject, e); }
   });
 }

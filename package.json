@@ -7,6 +7,6 @@
     "start": "node server/index.js"
   },
   "optionalDependencies": {
-    "@stoprocent/noble": "^2.0.0"
+    "@stoprocent/noble": "^2.5.7"
   }
 }
