@@ -66,11 +66,26 @@ still works too, until it expires in ~14 days.)
 ## Project layout
 
 ```
-docs/          Capture guide, API notes, HAR parser (parse-har.js)
-docs/captures/ Raw captures — SECRET (contain live tokens), gitignored
-server/        Local Node backend: index.js (http), inkposter.js (API client)
-public/        Browser UI (index.html / app.js / style.css)
+docs/           Capture guide, API notes, HAR parser (parse-har.js)
+docs/reference/ Reverse-engineering writeups (see "Reference docs" below)
+docs/captures/  Raw captures — SECRET (contain live tokens), gitignored
+server/         Local Node backend: index.js (http), inkposter.js (API client)
+public/         Browser UI (index.html / app.js / style.css)
 ```
+
+## Reference docs
+
+How the cloud + device internals were reverse-engineered, in `docs/reference/`:
+
+- [`CLOUD_API.md`](docs/reference/CLOUD_API.md) — the HTTP API: auth/signing,
+  endpoints, image upload/convert flow.
+- [`BLE_PROTOCOL.md`](docs/reference/BLE_PROTOCOL.md) — the Bluetooth LE protocol:
+  GATT surface, HMAC command framing, status payload, action IDs.
+- [`APK_ANALYSIS.md`](docs/reference/APK_ANALYSIS.md) — static analysis of the
+  official Android app (v2.1.1): tech stack, SDKs/trackers, backend hosts, and
+  cross-checks that confirm the auth secret, BLE key, and the (native) `.ntx`
+  converter. The APK itself is kept locally under `docs/reference/apk/`
+  (gitignored — not redistributed).
 
 ## Credits
 
