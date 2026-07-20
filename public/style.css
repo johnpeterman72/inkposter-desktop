@@ -189,12 +189,12 @@ details.panel[open] summary { margin-bottom: 8px; }
 /* Device view */
 .device-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 28px; align-items: start; }
 .hero { display: flex; flex-direction: column; gap: 14px; align-items: center; }
-.frame-mount { max-width: 100%; margin: 0 auto; background: #0b0d11;
+.frame-mount { position: relative; max-width: 100%; margin: 0 auto; background: #0b0d11;
   border: 10px solid #23262e; border-radius: 6px;
-  box-shadow: 0 18px 50px rgba(0,0,0,.5), inset 0 0 0 1px #000;
-  display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.frame-mount img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.frame-mount .ph { color: var(--muted); font-size: 13px; letter-spacing: .5px; }
+  box-shadow: 0 18px 50px rgba(0,0,0,.5), inset 0 0 0 1px #000; overflow: hidden; }
+.frame-mount img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.frame-mount .ph { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  color: var(--muted); font-size: 13px; letter-spacing: .5px; }
 .hero-cap { display: flex; flex-direction: column; gap: 4px; align-items: center; text-align: center; font-size: 13px; }
 .hero-cap .now b { color: var(--text); font-weight: 600; }
 .side { display: flex; flex-direction: column; gap: 4px; }

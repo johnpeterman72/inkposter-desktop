@@ -45,7 +45,12 @@ function drawFitted(srcCanvasCtx, W, H) {
   const cover = $("#fit").value === "cover";
   if ((ir > tr) === cover) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
   ctx.imageSmoothingQuality = "high";
+  // The 28.5" (sharp_28_5) mounts inverted — rotate 180° like the official app.
+  const f = FRAMES.find((x) => x.id === ($("#frame") && $("#frame").value));
+  const flip = f && f.modelAlias === "sharp_28_5";
+  if (flip) { ctx.translate(W, H); ctx.rotate(Math.PI); }
   ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  if (flip) ctx.setTransform(1, 0, 0, 1, 0, 0);
   return { c, ctx };
 }
 

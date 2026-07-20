@@ -2,6 +2,7 @@
 docs/captures/*.har
 docs/captures/*.mitm
 server/config.local.json
+server/cache/
 .env
 
 # Local machine-specific Claude Code settings (permission allowlist, etc.)

@@ -8,6 +8,16 @@ const ble = require("./ble");
 
 const PORT = process.env.PORT || 4173;
 const PUBLIC = path.join(__dirname, "..", "public");
+const CACHE = path.join(__dirname, "cache"); // local thumbnails of our own uploads
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Private (uploaded) items have no thumbnail from the API and their thumbnail
+// filename isn't derivable from the itemId, so cache what we upload to show it.
+function cacheThumb(itemId, buf) {
+  if (!UUID_RE.test(itemId)) return;
+  fs.mkdirSync(CACHE, { recursive: true });
+  fs.writeFileSync(path.join(CACHE, itemId + ".jpg"), buf);
+}
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
   ".json": "application/json", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
 
@@ -94,7 +104,17 @@ async function handleApi(req, res, url) {
       const mediaType = req.headers["content-type"] || "image/jpeg";
       const filename = url.searchParams.get("name") || "userimage.jpg";
       const result = await api.uploadAndShow(frame, buf, filename, mediaType);
+      try { if (result?.itemId) cacheThumb(result.itemId, buf); } catch {}
       return sendJSON(res, 200, result);
+    }
+    // Serve a cached thumbnail of a photo we uploaded (private items only).
+    if (req.method === "GET" && url.pathname === "/api/thumb") {
+      const id = url.searchParams.get("item") || "";
+      if (!UUID_RE.test(id)) return sendJSON(res, 400, { error: "bad item id" });
+      const file = path.join(CACHE, id + ".jpg");
+      if (!fs.existsSync(file)) { res.writeHead(404); return res.end("no cached image"); }
+      res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "max-age=86400" });
+      return res.end(fs.readFileSync(file));
     }
     // Library
     if (req.method === "GET" && url.pathname === "/api/categories") {

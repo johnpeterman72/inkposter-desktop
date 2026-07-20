@@ -129,7 +129,10 @@ function renderDevice() {
     <div class="device-grid">
       <div class="hero">
         <div class="frame-mount" style="${mountStyle(f)}">
-          ${ci.thumbnail ? `<img src="${esc(ci.thumbnail)}" alt="" />` : `<span class="ph">current artwork</span>`}
+          <span class="ph">current artwork</span>
+          ${ci.thumbnail ? `<img src="${esc(ci.thumbnail)}" alt="" />`
+            : ci.itemId ? `<img src="/api/thumb?item=${encodeURIComponent(ci.itemId)}" alt="" onerror="this.remove()" />`
+            : ""}
         </div>
         <div class="hero-cap">
           <span class="muted">${f.orientation} · ${f.displayResolution} · ${esc(f.modelName)}</span>
@@ -198,6 +201,9 @@ async function quickSend(f, file) {
   } catch (e) { msg.className = "result err"; msg.textContent = "Error: " + e.message; }
 }
 
+// Panels the app rotates 180° before conversion (else images land upside-down).
+const needs180 = (f) => !!f && f.modelAlias === "sharp_28_5";
+
 // Cover-crop an image to the frame's exact resolution/orientation, apply the
 // app's e-ink adjustment recipe, and return a JPEG blob (cloud does .ntx).
 function resizeToFrame(file, f) {
@@ -214,7 +220,12 @@ function resizeToFrame(file, f) {
       const ir = img.width / img.height, tr = W / H; let dw, dh;
       if (ir > tr) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
       ctx.imageSmoothingQuality = "high";
+      // The 28.5" (sharp_28_5) panel mounts inverted — the official app rotates
+      // 180° before conversion, so match that or the image lands upside-down.
+      const flip = needs180(f);
+      if (flip) { ctx.translate(W, H); ctx.rotate(Math.PI); }
       ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+      if (flip) ctx.setTransform(1, 0, 0, 1, 0, 0);
       const id = ctx.getImageData(0, 0, W, H);
       const d = id.data, sat = 1.45, bri = -4 * 2.55, con = 0.07, cf = (1 + con) / (1 - con), gamma = 0.6;
       const cl = (v) => v < 0 ? 0 : v > 255 ? 255 : v, c01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
