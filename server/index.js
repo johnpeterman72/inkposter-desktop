@@ -111,6 +111,35 @@ async function handleApi(req, res, url) {
       if (!frame || !orientation) return sendJSON(res, 400, { error: "need { frame, orientation }" });
       return sendJSON(res, 200, await api.updateFrame(frame, { orientation }));
     }
+    // Image-transition style (panel-specific)
+    if (req.method === "POST" && url.pathname === "/api/transition") {
+      const { frame, pipelineSwitchingMode, numberOfDivisions } = await readBody(req);
+      if (!frame) return sendJSON(res, 400, { error: "need { frame }" });
+      const patch = {};
+      if (pipelineSwitchingMode !== undefined) patch.pipelineSwitchingMode = pipelineSwitchingMode;
+      if (numberOfDivisions !== undefined) patch.numberOfDivisions = numberOfDivisions;
+      return sendJSON(res, 200, await api.setTransition(frame, patch));
+    }
+    // Full-panel redraw (clear ghosting) over the cloud
+    if (req.method === "POST" && url.pathname === "/api/full-refresh") {
+      const { frames } = await readBody(req);
+      if (!frames?.length) return sendJSON(res, 400, { error: "need { frames:[] }" });
+      return sendJSON(res, 200, await api.fullScreenUpdate(frames));
+    }
+    // Firmware
+    if (req.method === "GET" && url.pathname === "/api/version-check") {
+      return sendJSON(res, 200, await api.versionCheck());
+    }
+    if (req.method === "POST" && url.pathname === "/api/firmware/check") {
+      const { frames } = await readBody(req);
+      if (!frames?.length) return sendJSON(res, 400, { error: "need { frames:[] }" });
+      return sendJSON(res, 200, await api.checkFirmware(frames));
+    }
+    if (req.method === "POST" && url.pathname === "/api/firmware/update") {
+      const { frames } = await readBody(req);
+      if (!frames?.length) return sendJSON(res, 400, { error: "need { frames:[] }" });
+      return sendJSON(res, 200, await api.updateFirmware(frames));
+    }
     // --- BLE direct device control (optional; needs a BLE backend + adapter) ---
     if (req.method === "GET" && url.pathname === "/api/ble/available") {
       return sendJSON(res, 200, { available: ble.isAvailable() });

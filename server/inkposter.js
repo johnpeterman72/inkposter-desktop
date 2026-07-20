@@ -292,9 +292,31 @@ const api = {
     call("POST", `/item/cards?limit=${limit}${lastId ? "&last_id=" + lastId : ""}`, body),
   cardDetail: (cardId) => call("GET", "/item/card/" + cardId),
 
+  // --- Firmware ---
+  versionCheck: () => call("GET", "/frame/version-check"),
+  checkFirmware: (frameIds) =>
+    call("POST", "/frame/actions", { frames: frameIds, actions: ["CHECK_FW_UPDATE"] }),
+  updateFirmware: (frameIds) =>
+    call("POST", "/frame/actions", { frames: frameIds, actions: ["UPDATE_FW"] }),
+
+  // Full-panel redraw over the cloud — clears e-ink ghosting.
+  fullScreenUpdate: (frameIds) =>
+    call("POST", "/frame/actions", { frames: frameIds, actions: ["FULL_SCREEN_UPDATE"] }),
+
+  // Image-transition style (panel-specific: pipelineSwitchingMode / numberOfDivisions).
+  // Patch the settings, then push the EPD-type change to the device.
+  setTransition: async (frameId, patch) => {
+    const r = await api.updateFrame(frameId, patch);
+    await api.frameActions([frameId], ["CHANGE_EPD_TYPE_UPDATE"]);
+    return r;
+  },
+
   // --- Frame settings / rotation ---
   // Reads the current frame, merges a patch, and sends the full settings object
-  // the update endpoint expects (name maps from frameName).
+  // the update endpoint expects (name maps from frameName). The update REPLACES
+  // the whole object, so every settings field the frame reports must be echoed
+  // back — including panel-specific ones (pipelineSwitchingMode/numberOfDivisions,
+  // present on the 28.5", absent on the 31.5") — or the device resets them.
   updateFrame: async (frameId, patch) => {
     const { frames } = await call("GET", "/user/frames?limit=100");
     const f = (frames || []).find((x) => x.id === frameId);
@@ -306,8 +328,10 @@ const api = {
       syncInterval: f.syncInterval,
       fullScreenUpdateHour: f.fullScreenUpdateHour,
       fullScreenUpdateMinute: f.fullScreenUpdateMinute,
-      ...patch,
     };
+    if (f.pipelineSwitchingMode !== undefined) settings.pipelineSwitchingMode = f.pipelineSwitchingMode;
+    if (f.numberOfDivisions !== undefined) settings.numberOfDivisions = f.numberOfDivisions;
+    Object.assign(settings, patch);
     return call("POST", `/user/frame/${frameId}/update`, settings);
   },
 };

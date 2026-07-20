@@ -274,15 +274,83 @@ Send cloud-side commands to frames.
 {"frames": ["<frame-uuid>"], "actions": ["<ACTION_NAME>"]}
 ```
 
-Known actions (from Proxyman captures):
-- `REPORT_FRAME_STATUS` — request the device to report fresh status to the cloud
-- `CHECK_FW_UPDATE` — trigger a firmware update check
+Known actions (full enum, leaked via a 400 on an invalid action):
+`NEW_IMAGES`, `UPDATE_IMAGES`, `CHANGE_SYNC_INTERVAL`, `CHANGE_SLIDESHOW_INTERVAL`,
+`CHANGE_EPD_TYPE_UPDATE`, `CHECK_FW_UPDATE`, `UPDATE_FW`, `REPORT_FRAME_STATUS`,
+`FACTORY_RESET`, `FULL_SCREEN_UPDATE`, `CHANGE_FULL_SCREEN_UPDATE_TIME`.
+
+- `NEW_IMAGES` — "new images, pull them" (the sync-now signal).
+- `REPORT_FRAME_STATUS` — device phones home with fresh telemetry (used to poll).
+- `CHECK_FW_UPDATE` / `UPDATE_FW` — firmware (see flow below).
+- `CHANGE_EPD_TYPE_UPDATE` — push changed panel/transition settings to the device
+  (sent right after a settings `update` that changes `pipelineSwitchingMode` /
+  `numberOfDivisions` — see "Image transition" below).
+- `FULL_SCREEN_UPDATE` — full-panel redraw (clears ghosting).
+- ⚠️ `FACTORY_RESET`, `UPDATE_FW` — destructive/irreversible; never send casually.
 
 Response (201):
 
 ```json
 {"timestamp": 1771189610011, "statusCode": 200, "message": "Frames actions has been sent successfully!"}
 ```
+
+#### Firmware update flow  (from the 07-20 capture, W2850.1.1.493 → .708)
+
+1. `POST /frame/actions` `{"actions":["CHECK_FW_UPDATE"], "frames":[id]}`.
+2. Poll `GET /frame/version-check` until the frame shows an update:
+   ```json
+   {"<frameId>": {"newVersionAvailable": true, "version": "W2850.1.1.708",
+     "releaseNotes": "Wi-Fi connection improvements.", "fwSize": 0, "date": ...}}
+   ```
+3. `POST /frame/actions` `{"actions":["UPDATE_FW"], "frames":[id]}` to start it.
+4. Spam `REPORT_FRAME_STATUS` + poll `GET /frame/status`; `firmwareVersion` flips
+   to the new build when done (the device reboots to apply). Keep it on USB-C —
+   the app only offered `UPDATE_FW` while `isCharging: true`.
+
+### Image transition (`pipelineSwitchingMode` / `numberOfDivisions`)
+
+Some panels (seen on the 28.5" `sharp_28_5`, not the 31.5" `spectra_31_5`) expose a
+**transition style** for how the e-ink redraws when the image changes. Two fields
+appear on the frame object (`/user/frames`) and in the settings `update` payload:
+
+- `pipelineSwitchingMode`: `0` = standard full refresh, `1` = pipelined/regional.
+- `numberOfDivisions`: `1` = whole panel at once; `16` = update in 16 bands (a
+  progressive "wipe" reveal instead of a single full-panel flash).
+
+To change it: `POST /user/frame/{id}/update` with the new values, **then**
+`POST /frame/actions {"actions":["CHANGE_EPD_TYPE_UPDATE"], "frames":[id]}` to push
+it to the device. ⚠️ These fields are **panel-specific** — they're absent on the
+31.5" frame. The settings update replaces the whole object, so a client must
+**preserve `pipelineSwitchingMode`/`numberOfDivisions`** (and any unknown fields)
+when patching, or the transition setting resets.
+
+### Slideshows
+
+A frame can run a **slideshow** (playlist) instead of a single image. Slideshows
+live on the frame object from `GET /user/frames`:
+
+```json
+"currentSlideshowId": null,          // active slideshow id, or null = single image
+"slideshowInterval": 60,             // seconds per slide (also settable via update)
+"slideshows": [{
+  "id": "f3e5b917-…",
+  "orientation": "portrait",
+  "shuffle": false,
+  "items": [
+    {"itemId": "1235c276-…", "cardId": "e029…", "weight": 0, "thumbnail": "https://…"},
+    {"itemId": "74ae8add-…", "cardId": "f4a3…", "weight": 1, "thumbnail": "https://…"}
+  ]
+}]
+```
+
+`weight` is the slide order. Create/assign endpoints (not exercised in this
+capture, from earlier notes): `POST /slideshow/save` and `POST //item/slideshow-to-frame`.
+
+### `currentItem` can carry full art metadata
+
+When the current image is a library card (not a private upload), `currentItem`
+includes `title`, `thumbnail`, and `authors[]` — enough to render "now showing"
+with the artwork and artist. Private uploads carry only `{itemId, private:true}`.
 
 ### Image upload and display
 

@@ -11,6 +11,12 @@ server/config.local.json
 # Attribution + link live in README.md and the reference docs.
 docs/reference/ha-inkposter-main/
 
+# APK + local RE working files: kept in-repo folder for reference/testing, never committed
+# (InkPoster's copyrighted binary). Analysis writeup lives in docs/reference/APK_ANALYSIS.md.
+*.apk
+*.xapk
+docs/reference/apk/
+
 # Node
 node_modules/
 npm-debug.log*
