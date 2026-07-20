@@ -140,6 +140,12 @@ async function handleApi(req, res, url) {
       if (!frames?.length) return sendJSON(res, 400, { error: "need { frames:[] }" });
       return sendJSON(res, 200, await api.updateFirmware(frames));
     }
+    // Create a playlist (slideshow) and activate it on a frame.
+    if (req.method === "POST" && url.pathname === "/api/slideshow") {
+      const { items, shuffle, orientation, frame, interval } = await readBody(req);
+      if (!frame || !items?.length) return sendJSON(res, 400, { error: "need { frame, items:[{id,weight}] }" });
+      return sendJSON(res, 200, await api.createSlideshow({ items, shuffle, orientation, frame, interval }));
+    }
     // --- BLE direct device control (optional; needs a BLE backend + adapter) ---
     if (req.method === "GET" && url.pathname === "/api/ble/available") {
       return sendJSON(res, 200, { available: ble.isAvailable() });
@@ -162,6 +168,11 @@ async function handleApi(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/ble/ghosting-clean") {
       const opts = await readBody(req);
       return sendJSON(res, 200, await ble.ghostingClean(opts || {}));
+    }
+    if (req.method === "POST" && url.pathname === "/api/ble/set-wifi") {
+      const opts = await readBody(req); // { ssid, passwd, id?, name?, sharedKey?, apiEnvType? }
+      if (!opts?.ssid) return sendJSON(res, 400, { error: "need { ssid }" });
+      return sendJSON(res, 200, await ble.setWifi(opts));
     }
     return sendJSON(res, 404, { error: "unknown api route" });
   } catch (e) {

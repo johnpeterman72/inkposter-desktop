@@ -9,6 +9,7 @@ const api = {
 
 let FRAMES = [];
 let selectedCard = null;
+let DRAFT = []; // playlist-in-progress: array of library card objects
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const short = (id) => id ? id.slice(0, 8) + "…" : "—";
@@ -57,7 +58,11 @@ async function loadFrames() {
   renderDevice();
   renderPlaylists();
   const tgt = $("#target");
-  if (tgt) { tgt.innerHTML = FRAMES.map(f => `<option value="${f.id}">${esc(f.frameName)}</option>`).join(""); if (SELECTED) tgt.value = SELECTED; }
+  if (tgt) {
+    tgt.innerHTML = (FRAMES.length > 1 ? `<option value="__all__">All displays</option>` : "") +
+      FRAMES.map(f => `<option value="${f.id}">${esc(f.frameName)}</option>`).join("");
+    if (SELECTED) tgt.value = SELECTED;
+  }
 }
 
 const selectedFrame = () => FRAMES.find(f => f.id === SELECTED) || FRAMES[0];
@@ -133,6 +138,14 @@ function renderDevice() {
         <div class="progress hidden" data-progress="${f.id}"></div>
       </div>
       <div class="side">
+        <div class="sendcard">
+          <div class="drop" id="dropzone">
+            <b>Send new artwork</b>
+            <span class="muted small">Drop a photo or <label class="link">browse<input type="file" id="quickfile" accept="image/*" hidden></label></span>
+            <span class="muted small">Auto-resized & rotated to ${f.orientation} ${f.displayResolution}. <a href="/modifier.html">Full editor →</a></span>
+          </div>
+          <div id="quickMsg" class="result"></div>
+        </div>
         <div class="stats">
           <div class="stat battery"><div class="k">Battery${s.isCharging ? " ⚡" : ""}</div><div class="v" data-cell="battery-${f.id}">${battery}</div></div>
           <div class="stat"><div class="k">Wi-Fi</div><div class="v" data-cell="wifi-${f.id}">${wifi}</div></div>
@@ -152,17 +165,114 @@ function renderDevice() {
       </div>
     </div>`;
   wireFrameHandlers(host);
+  wireQuickSend(f);
 }
 
-// Playlists view: existing slideshows on each frame (read-only for now).
+// --- Inline "quick send": drop/pick a photo, resize to the frame, push ---
+function wireQuickSend(f) {
+  const file = $("#quickfile"), drop = $("#dropzone");
+  if (!file) return;
+  const handle = (fl) => { if (fl) quickSend(f, fl); };
+  file.addEventListener("change", e => handle(e.target.files[0]));
+  if (drop) {
+    ["dragover", "dragenter"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+    ["dragleave", "dragend"].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove("over")));
+    drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); handle(e.dataTransfer.files[0]); });
+  }
+}
+
+async function quickSend(f, file) {
+  const msg = $("#quickMsg");
+  msg.className = "result"; msg.textContent = "Preparing image…";
+  try {
+    const blob = await resizeToFrame(file, f);
+    msg.textContent = "Uploading & converting on the cloud (~10–30s)…";
+    const res = await fetch(`/api/upload?frame=${encodeURIComponent(f.id)}&name=photo.jpg`, {
+      method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `upload failed (${res.status})`);
+    msg.className = "result ok"; msg.textContent = "Sent! Delivering to the display…";
+    pollProgress(f.id);
+    setTimeout(loadFrames, 1600);
+  } catch (e) { msg.className = "result err"; msg.textContent = "Error: " + e.message; }
+}
+
+// Cover-crop an image to the frame's exact resolution/orientation, apply the
+// app's e-ink adjustment recipe, and return a JPEG blob (cloud does .ntx).
+function resizeToFrame(file, f) {
+  return new Promise((resolve, reject) => {
+    const [a, b] = (f.displayResolution || "1600x2560").split("x").map(Number);
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    const [W, H] = f.orientation === "portrait" ? [lo, hi] : [hi, lo];
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(img.src);
+      const c = document.createElement("canvas"); c.width = W; c.height = H;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+      const ir = img.width / img.height, tr = W / H; let dw, dh;
+      if (ir > tr) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+      const id = ctx.getImageData(0, 0, W, H);
+      const d = id.data, sat = 1.45, bri = -4 * 2.55, con = 0.07, cf = (1 + con) / (1 - con), gamma = 0.6;
+      const cl = (v) => v < 0 ? 0 : v > 255 ? 255 : v, c01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
+      for (let i = 0; i < d.length; i += 4) {
+        let r = d[i] + bri, g = d[i + 1] + bri, bl = d[i + 2] + bri;
+        r = cf * (r - 128) + 128; g = cf * (g - 128) + 128; bl = cf * (bl - 128) + 128;
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+        r = lum + (r - lum) * sat; g = lum + (g - lum) * sat; bl = lum + (bl - lum) * sat;
+        d[i] = cl(255 * Math.pow(c01(r / 255), gamma));
+        d[i + 1] = cl(255 * Math.pow(c01(g / 255), gamma));
+        d[i + 2] = cl(255 * Math.pow(c01(bl / 255), gamma));
+      }
+      ctx.putImageData(id, 0, 0);
+      c.toBlob(bl => bl ? resolve(bl) : reject(new Error("encode failed")), "image/jpeg", 0.92);
+    };
+    img.onerror = () => reject(new Error("could not read that image"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// Playlists view: a builder (from the Library draft) + existing slideshows.
 function renderPlaylists() {
   const el = $("#playlists"); if (!el) return;
+  el.innerHTML = playlistBuilderHTML() + existingSlideshowsHTML();
+  const create = $("#pl-create"); if (create) create.addEventListener("click", createPlaylist);
+  const clear = $("#pl-clear"); if (clear) clear.addEventListener("click", () => { DRAFT = []; renderPlaylists(); });
+  el.querySelectorAll("[data-rm]").forEach(b => b.addEventListener("click", () => { DRAFT.splice(+b.dataset.rm, 1); renderPlaylists(); }));
+  const fs = $("#pl-frame"); if (fs && SELECTED) fs.value = SELECTED;
+}
+
+function playlistBuilderHTML() {
+  if (!FRAMES.length) return "";
+  const frameOpts = FRAMES.map(f => `<option value="${f.id}">${esc(f.frameName)}</option>`).join("");
+  const ivOpts = [60, 120, 180, 300, 600, 1800, 3600].map(s => `<option value="${s}">${fmtInterval(s)}</option>`).join("");
+  const draft = DRAFT.length
+    ? `<div class="ss-thumbs">${DRAFT.map((c, i) => {
+        const th = c.items && c.items[0] && c.items[0].thumbnail;
+        return `<span class="ss-thumb draft" title="${esc(c.shortTitle || "")}">${th ? `<img src="${esc(th)}" alt="" />` : ""}<button class="rm" data-rm="${i}" title="Remove">×</button></span>`;
+      }).join("")}</div>`
+    : `<p class="muted small">Empty. Open an artwork in the <b>Library</b> and choose “Add to playlist,” then come back here.</p>`;
+  return `<div class="panel">
+    <h2>New playlist</h2>
+    ${draft}
+    <div class="row">
+      <label>Play on <select id="pl-frame">${frameOpts}</select></label>
+      <label>Every <select id="pl-interval">${ivOpts}</select></label>
+      <label class="inline"><input type="checkbox" id="pl-shuffle" /> Shuffle</label>
+      <button id="pl-create" ${DRAFT.length ? "" : "disabled"}>Create playlist</button>
+      ${DRAFT.length ? `<button class="ghost" id="pl-clear">Clear draft</button>` : ""}
+    </div>
+    <div id="pl-msg" class="result"></div>
+  </div>`;
+}
+
+function existingSlideshowsHTML() {
   const withSs = FRAMES.filter(f => (f.slideshows || []).length);
-  if (!withSs.length) {
-    el.innerHTML = `<p class="muted">No slideshows yet. Creating playlists from here is a later update — for now this mirrors what's set in the phone app.</p>`;
-    return;
-  }
-  el.innerHTML = withSs.map(f => `
+  if (!withSs.length) return "";
+  return `<h2 class="section-h">On your displays</h2>` + withSs.map(f => `
     <div class="panel">
       <h2>${esc(f.frameName)} <span class="muted">· every ${fmtInterval(f.slideshowInterval)}</span></h2>
       ${(f.slideshows || []).map(ss => {
@@ -173,6 +283,38 @@ function renderPlaylists() {
         </div>`;
       }).join("")}
     </div>`).join("");
+}
+
+function addToDraft(card) {
+  if (card && !DRAFT.find(c => c.id === card.id)) DRAFT.push(card);
+}
+
+// Create a playlist from the draft: resolve each card to the item variant that
+// matches the target frame's model, then save + activate.
+async function createPlaylist() {
+  const frameId = $("#pl-frame").value;
+  const f = FRAMES.find(x => x.id === frameId);
+  const interval = +$("#pl-interval").value;
+  const shuffle = $("#pl-shuffle").checked;
+  const msg = $("#pl-msg");
+  if (!f || !DRAFT.length) return;
+  const items = []; let missing = 0;
+  DRAFT.forEach((card, i) => {
+    const it = pickItem(card, f);
+    if (it) items.push({ id: it.id, weight: i }); else missing++;
+  });
+  if (!items.length) { msg.className = "result err"; msg.textContent = "None of these artworks have a variant for this display."; return; }
+  const btn = $("#pl-create"); btn.disabled = true; btn.textContent = "Creating…";
+  const res = await api.post("/api/slideshow", { items, shuffle, orientation: f.orientation, frame: frameId, interval });
+  if (res.ok) {
+    msg.className = "result ok";
+    msg.textContent = `Playlist created — ${items.length} slide${items.length > 1 ? "s" : ""} on ${f.frameName}, every ${fmtInterval(interval)}${missing ? ` (${missing} skipped — no variant for this display)` : ""}.`;
+    DRAFT = [];
+    setTimeout(loadFrames, 1200);
+  } else {
+    msg.className = "result err"; msg.textContent = "Failed: " + (res.data?.error || "unknown");
+    btn.disabled = false; btn.textContent = "Create playlist";
+  }
 }
 
 // Firmware row: shows an update banner (charging-gated) or an up-to-date line.
@@ -194,13 +336,17 @@ function fwRow(f) {
 }
 
 // Image-transition control — only for panels that expose it (e.g. the 28.5").
+// pipelineSwitchingMode 0-4 = refresh effect; numberOfDivisions 1/2/4/8/16 = bands.
 function transitionRow(f) {
   if (f.pipelineSwitchingMode === undefined) return "";
-  const pipelined = f.pipelineSwitchingMode === 1;
+  const modeOpts = [0, 1, 2, 3, 4].map(m =>
+    `<option value="${m}" ${f.pipelineSwitchingMode === m ? "selected" : ""}>${m === 0 ? "Off (full flash)" : "Mode " + m}</option>`).join("");
+  const divOpts = [1, 2, 4, 8, 16].map(d =>
+    `<option value="${d}" ${f.numberOfDivisions === d ? "selected" : ""}>${d === 1 ? "whole panel" : d + " bands"}</option>`).join("");
   return `<div class="subrow">
-    <span class="lbl">Image transition:</span>
-    <button class="pill ${!pipelined ? "on" : ""}" data-trans="${f.id}" data-mode="standard" title="Single full-panel refresh">Standard flash</button>
-    <button class="pill ${pipelined ? "on" : ""}" data-trans="${f.id}" data-mode="pipelined" title="Progressive 16-band reveal">Pipelined reveal</button>
+    <span class="lbl">Transition:</span>
+    <select data-transmode="${f.id}" title="Panel refresh effect">${modeOpts}</select>
+    <select data-transdiv="${f.id}" title="How many bands the panel reveals in">${divOpts}</select>
   </div>`;
 }
 
@@ -226,7 +372,7 @@ function wireFrameHandlers(container) {
   container.querySelectorAll("[data-refresh]").forEach(b => b.addEventListener("click", () => fullRefresh(b.dataset.refresh, b)));
   container.querySelectorAll("[data-fwcheck]").forEach(b => b.addEventListener("click", () => checkFw(b.dataset.fwcheck, b)));
   container.querySelectorAll("[data-fwupdate]").forEach(b => b.addEventListener("click", () => updateFw(b.dataset.fwupdate, b)));
-  container.querySelectorAll("[data-trans]").forEach(b => b.addEventListener("click", () => setTransition(b.dataset.trans, b.dataset.mode)));
+  container.querySelectorAll("[data-transmode],[data-transdiv]").forEach(s => s.addEventListener("change", () => applyTransition(s.dataset.transmode || s.dataset.transdiv)));
 }
 
 const INTERVALS = [[300, "5 min"], [600, "10 min"], [900, "15 min"], [1800, "30 min"], [3600, "1 hour"], [7200, "2 hours"], [21600, "6 hours"], [43200, "12 hours"], [86400, "24 hours"]];
@@ -297,21 +443,16 @@ async function updateFw(frameId, btn) {
     : "Failed to start update: " + (res.data?.error || "unknown"));
 }
 
-// Image-transition style (panel-specific). standard = full flash; pipelined = 16-band reveal.
-async function setTransition(frameId, mode) {
+// Image-transition style (panel-specific): pipelineSwitchingMode 0-4 + divisions.
+async function applyTransition(frameId) {
   const f = FRAMES.find(x => x.id === frameId); if (!f) return;
-  const patch = mode === "pipelined"
-    ? { pipelineSwitchingMode: 1, numberOfDivisions: 16 }
-    : { pipelineSwitchingMode: 0, numberOfDivisions: 1 };
-  document.querySelectorAll(`[data-trans="${frameId}"]`).forEach(b => (b.disabled = true));
-  const res = await api.post("/api/transition", { frame: frameId, ...patch });
-  if (res.ok) { f.pipelineSwitchingMode = patch.pipelineSwitchingMode; f.numberOfDivisions = patch.numberOfDivisions; }
+  const mode = +document.querySelector(`[data-transmode="${frameId}"]`).value;
+  const div = +document.querySelector(`[data-transdiv="${frameId}"]`).value;
+  const res = await api.post("/api/transition", { frame: frameId, pipelineSwitchingMode: mode, numberOfDivisions: div });
+  if (res.ok) { f.pipelineSwitchingMode = mode; f.numberOfDivisions = div; }
   hint(frameId, res.ok
-    ? `Transition set to ${mode === "pipelined" ? "pipelined 16-band reveal" : "standard full-panel flash"}. Applies on the next image change.`
+    ? `Transition set: ${mode === 0 ? "off (full flash)" : "mode " + mode}, ${div === 1 ? "whole panel" : div + " bands"}. Applies on the next image change.`
     : "Failed: " + (res.data?.error || "unknown"));
-  document.querySelectorAll(`[data-trans="${frameId}"]`).forEach(b => {
-    b.disabled = false; b.classList.toggle("on", b.dataset.mode === mode);
-  });
 }
 
 // Light background poll: refresh live telemetry cells without a full re-render.
@@ -366,21 +507,49 @@ async function loadCategories() {
   if (cats[0]) loadCards(cats[0].id);
 }
 
+let LIB = { category: null, cards: [], lastId: null, loading: false, done: false };
+
 async function loadCards(categoryId) {
+  LIB = { category: categoryId, cards: [], lastId: null, loading: false, done: false };
+  if ($("#libSearch")) $("#libSearch").value = "";
+  $("#cards").innerHTML = '<p class="muted">Loading…</p>';
+  await loadMoreCards();
+}
+
+async function loadMoreCards() {
+  if (LIB.loading || LIB.done) return;
+  LIB.loading = true;
+  const more = $("#libMore"); if (more) { more.disabled = true; more.textContent = "Loading…"; }
+  const res = await api.post("/api/cards", { category: LIB.category, limit: 120, lastId: LIB.lastId });
+  const page = (res.data && res.data.itemCards) || [];
+  LIB.cards.push(...page);
+  LIB.lastId = page.length ? page[page.length - 1].id : LIB.lastId;
+  if (page.length < 120) LIB.done = true;
+  LIB.loading = false;
+  renderCards();
+}
+
+function renderCards() {
   const grid = $("#cards");
-  grid.innerHTML = '<p class="muted">Loading…</p>';
-  const res = await api.post("/api/cards", { category: categoryId, limit: 60 });
-  const cards = (res.data && res.data.itemCards) || [];
-  if (!cards.length) { grid.innerHTML = '<p class="muted">No artwork in this category.</p>'; return; }
-  grid.innerHTML = cards.map((c, i) => {
-    const thumb = c.items?.[0]?.thumbnail || "";
-    const author = c.authors?.[0]?.fullName || c.authors?.[0]?.name || "";
-    return `<figure class="tile" data-i="${i}">
-      <img loading="lazy" src="${esc(thumb)}" alt="${esc(c.shortTitle)}" />
-      <figcaption><b>${esc(c.shortTitle)}</b>${author ? "<br>" + esc(author) : ""}</figcaption>
-    </figure>`;
-  }).join("");
-  grid.querySelectorAll(".tile").forEach(t => t.addEventListener("click", () => openPreview(cards[+t.dataset.i])));
+  const q = ($("#libSearch") ? $("#libSearch").value : "").trim().toLowerCase();
+  const list = LIB.cards.map((c, i) => ({ c, i })).filter(({ c }) =>
+    !q || (c.shortTitle || "").toLowerCase().includes(q) ||
+    (c.authors || []).some(a => (a.fullName || a.name || "").toLowerCase().includes(q)));
+  if (!LIB.cards.length) grid.innerHTML = '<p class="muted">No artwork in this category.</p>';
+  else if (!list.length) grid.innerHTML = '<p class="muted">No matches in the loaded set — try “Load more.”</p>';
+  else {
+    grid.innerHTML = list.map(({ c, i }) => {
+      const thumb = c.items?.[0]?.thumbnail || "";
+      const author = c.authors?.[0]?.fullName || c.authors?.[0]?.name || "";
+      return `<figure class="tile" data-i="${i}">
+        <img loading="lazy" src="${esc(thumb)}" alt="${esc(c.shortTitle)}" />
+        <figcaption><b>${esc(c.shortTitle)}</b>${author ? "<br>" + esc(author) : ""}</figcaption>
+      </figure>`;
+    }).join("");
+    grid.querySelectorAll(".tile").forEach(t => t.addEventListener("click", () => openPreview(LIB.cards[+t.dataset.i])));
+  }
+  const more = $("#libMore");
+  if (more) { more.classList.toggle("hidden", LIB.done || !LIB.cards.length); more.disabled = false; more.textContent = "Load more"; }
 }
 
 // ---- Preview + show ----
@@ -407,22 +576,23 @@ function pickItem(card, frame) {
 }
 
 async function showCard() {
-  const f = activeFrame();
-  const item = pickItem(selectedCard, f);
   const msg = $("#previewMsg");
-  if (!item) { msg.className = "result err"; msg.textContent = "No matching item for this display."; return; }
+  const targets = $("#target").value === "__all__" ? FRAMES : [activeFrame()];
+  // Resolve the model-matched item variant per target frame.
+  const jobs = targets.map(f => ({ f, item: pickItem(selectedCard, f) })).filter(j => j.item);
+  if (!jobs.length) { msg.className = "result err"; msg.textContent = "No matching variant for the selected display(s)."; return; }
   $("#previewShow").disabled = true; $("#previewShow").textContent = "Sending…";
-  const res = await api.post("/api/show", { frames: [f.id], items: [item.id] });
-  if (res.ok) {
-    msg.className = "result ok";
-    msg.textContent = "Sent! Updates on next sync — or hit \"Refresh status\" on the display.";
-    setTimeout(loadFrames, 1500);
-    setTimeout(closePreview, 1600);
-    pollProgress(f.id);
-  } else {
-    msg.className = "result err"; msg.textContent = "Error: " + (res.data?.error || "unknown");
+  let ok = 0;
+  for (const j of jobs) {
+    const res = await api.post("/api/show", { frames: [j.f.id], items: [j.item.id] });
+    if (res.ok) { ok++; pollProgress(j.f.id); }
   }
-  $("#previewShow").disabled = false; $("#previewShow").textContent = "Show on display";
+  if (ok) {
+    msg.className = "result ok";
+    msg.textContent = `Sent to ${ok} display${ok > 1 ? "s" : ""}. Updates on next sync — or hit Refresh on the display.`;
+    setTimeout(loadFrames, 1500); setTimeout(closePreview, 1600);
+  } else { msg.className = "result err"; msg.textContent = "Failed to send."; }
+  $("#previewShow").disabled = false; $("#previewShow").textContent = "Show now";
 }
 
 // ---- Advanced: show by ID ----
@@ -445,8 +615,17 @@ async function showById() {
 
 $("#showBtn").addEventListener("click", showById);
 $("#previewShow").addEventListener("click", showCard);
+$("#previewAdd").addEventListener("click", () => {
+  addToDraft(selectedCard);
+  renderPlaylists();
+  const m = $("#previewMsg"); m.className = "result ok";
+  m.textContent = `Added to playlist draft (${DRAFT.length}). Open Playlists to finish.`;
+});
 $("#previewClose").addEventListener("click", closePreview);
 $("#preview").addEventListener("click", (e) => { if (e.target.id === "preview") closePreview(); });
+$("#libSearch")?.addEventListener("input", renderCards);
+$("#libMore")?.addEventListener("click", () => loadMoreCards());
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePreview(); });
 
 // ---- BLE direct control (optional) ----
 function bleMsg(text, cls) { const el = $("#bleMsg"); el.className = "result " + (cls || ""); el.textContent = text; }
@@ -503,6 +682,15 @@ if ($("#bleScan")) {
   $("#bleFetch").addEventListener("click", (e) => bleAction("/api/ble/fetch", "Fetch now", e.target));
   $("#bleGhost").addEventListener("click", (e) => bleAction("/api/ble/ghosting-clean", "Ghosting clean", e.target));
   $("#bleReboot").addEventListener("click", (e) => bleAction("/api/ble/reboot", "Reboot", e.target));
+  $("#wifiSend").addEventListener("click", async (e) => {
+    const ssid = $("#wifiSsid").value.trim(), passwd = $("#wifiPass").value;
+    if (!ssid) { bleMsg("Enter a Wi-Fi network name (SSID).", "err"); return; }
+    e.target.disabled = true; const t = e.target.textContent; e.target.textContent = "Sending…";
+    bleMsg("Sending Wi-Fi credentials to the frame over Bluetooth…");
+    const res = await api.post("/api/ble/set-wifi", { ssid, passwd, id: bleSelected() || undefined, sharedKey: bleSharedKey() });
+    bleMsg(res.ok ? "Wi-Fi settings sent — the frame will reconnect." : "Failed: " + (res.data?.error || "unknown"), res.ok ? "ok" : "err");
+    e.target.disabled = false; e.target.textContent = t;
+  });
 }
 
 document.querySelectorAll(".navitem").forEach(n => n.addEventListener("click", () => showView(n.dataset.view)));

@@ -286,6 +286,20 @@ const api = {
   // --- Personal photo upload ---
   uploadAndShow,
 
+  // --- Slideshows / playlists ---
+  // Create a slideshow then activate it on the frame. `items` is [{id, weight}].
+  // (The activate path really does have a double slash — matches the app.)
+  saveSlideshow: (body) => call("POST", "/slideshow/save", body),
+  slideshowToFrame: (id) => call("POST", "//item/slideshow-to-frame", { id }),
+  createSlideshow: async ({ items, shuffle = false, orientation, frame, interval }) => {
+    const saved = await call("POST", "/slideshow/save", {
+      items, shuffle, orientation,
+      frames: [{ id: frame, slideshowInterval: interval }],
+    });
+    if (saved && saved.id) await call("POST", "//item/slideshow-to-frame", { id: saved.id });
+    return saved;
+  },
+
   // --- Library browsing ---
   categories: () => call("GET", "/categories"),
   cards: (body, limit = 60, lastId) =>

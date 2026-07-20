@@ -183,6 +183,14 @@ async function sendAction(actionObj, { sharedKey, ...selector } = {}) {
   });
 }
 
+// Provision the frame's Wi-Fi over BLE (SET_SETTINGS / action 2). Used to pair /
+// onboard a new frame or move it to a new network. apiEnvType selects the cloud
+// environment (default "0" = prod). NOT tested against hardware — beta.
+async function setWifi({ ssid, passwd, apiEnvType = "0", ...selector } = {}) {
+  if (!ssid) throw new Error("need a Wi-Fi SSID");
+  return sendAction({ action: 2, apiEnvType, ssid, passwd: passwd || "" }, selector);
+}
+
 module.exports = {
   isAvailable,
   scan,
@@ -191,5 +199,6 @@ module.exports = {
   fetch: (opts) => sendAction(ACTIONS.fetch, opts),
   reboot: (opts) => sendAction(ACTIONS.reboot, opts),
   ghostingClean: (opts) => sendAction(ACTIONS.ghostingClean, opts),
+  setWifi,
   ACTIONS,
 };

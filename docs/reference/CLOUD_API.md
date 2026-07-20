@@ -313,9 +313,10 @@ Some panels (seen on the 28.5" `sharp_28_5`, not the 31.5" `spectra_31_5`) expos
 **transition style** for how the e-ink redraws when the image changes. Two fields
 appear on the frame object (`/user/frames`) and in the settings `update` payload:
 
-- `pipelineSwitchingMode`: `0` = standard full refresh, `1` = pipelined/regional.
-- `numberOfDivisions`: `1` = whole panel at once; `16` = update in 16 bands (a
-  progressive "wipe" reveal instead of a single full-panel flash).
+- `pipelineSwitchingMode`: **`0`–`4`** — `0` = standard full-panel flash; `1`–`4`
+  are different pipelined/regional refresh effects (exact look unlabeled).
+- `numberOfDivisions`: **`1`, `2`, `4`, `8`, `16`** — how many bands the panel
+  reveals in (`1` = whole panel at once; higher = a more gradual "wipe").
 
 To change it: `POST /user/frame/{id}/update` with the new values, **then**
 `POST /frame/actions {"actions":["CHANGE_EPD_TYPE_UPDATE"], "frames":[id]}` to push
@@ -343,8 +344,21 @@ live on the frame object from `GET /user/frames`:
 }]
 ```
 
-`weight` is the slide order. Create/assign endpoints (not exercised in this
-capture, from earlier notes): `POST /slideshow/save` and `POST //item/slideshow-to-frame`.
+`weight` is the slide order. **Create + activate** (captured 07-20):
+
+1. `POST /slideshow/save` →
+   ```json
+   {"items": [{"id":"<itemId>","weight":0}, {"id":"<itemId>","weight":1}],
+    "shuffle": false, "orientation": "landscape",
+    "frames": [{"id":"<frameId>","slideshowInterval":120}]}
+   ```
+   returns `{"id":"<slideshowId>","message":"Slideshow created successfully"}`.
+2. `POST //item/slideshow-to-frame` (yes, a **double slash** after `v1`) →
+   `{"id":"<slideshowId>"}` → `ok`. This activates it on the frame.
+
+Each `items[].id` must be the variant matching the target frame's model (same
+per-model item selection as `show-on-frame`). `slideshowInterval` (seconds per
+slide) can also be changed via `POST /user/frame/{id}/update`.
 
 ### `currentItem` can carry full art metadata
 

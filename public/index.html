@@ -36,7 +36,9 @@
           <label class="inline">Show on <select id="target"></select></label>
         </div>
         <div id="cats" class="chips"><span class="muted">Loading categories…</span></div>
+        <div class="row libsearch"><input id="libSearch" type="text" placeholder="Filter this category by title or artist…" /></div>
         <div id="cards" class="grid"></div>
+        <div class="loadmore"><button id="libMore" class="ghost hidden">Load more</button></div>
         <div id="browseMsg" class="result"></div>
       </section>
 
@@ -85,6 +87,12 @@
             <button id="bleGhost" class="ghost">Ghosting clean</button>
             <button id="bleReboot" class="ghost">Reboot</button>
           </div>
+          <p class="muted small" style="margin:10px 0 2px">Pair / move a frame to a Wi-Fi network (sends the credentials to the selected frame over Bluetooth):</p>
+          <div class="row">
+            <input id="wifiSsid" type="text" placeholder="Wi-Fi network (SSID)" />
+            <input id="wifiPass" type="password" placeholder="Wi-Fi password" />
+            <button id="wifiSend" class="ghost">Send Wi-Fi over BLE</button>
+          </div>
           <div id="bleMsg" class="result"></div>
         </details>
       </section>
@@ -99,7 +107,8 @@
         <h3 id="previewTitle"></h3>
         <p id="previewSub" class="muted"></p>
         <div class="preview-actions">
-          <button id="previewShow">Show on display</button>
+          <button id="previewShow">Show now</button>
+          <button id="previewAdd" class="ghost">Add to playlist</button>
           <button id="previewClose" class="ghost">Cancel</button>
         </div>
         <div id="previewMsg" class="result"></div>
