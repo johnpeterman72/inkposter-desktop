@@ -5,6 +5,15 @@ const fs = require("fs");
 const path = require("path");
 const api = require("./inkposter");
 const ble = require("./ble");
+const samsung = require("./samsung");
+
+// Samsung EMDX frames are configured locally (host + pin + optional mac) in
+// config.local.json. The PIN never leaves the server (like the InkPoster token).
+function samsungFrames() {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, "config.local.json"), "utf8")).samsungFrames || []; }
+  catch { return []; }
+}
+const samsungFrame = (host) => samsungFrames().find((f) => f.host === host);
 
 const PORT = process.env.PORT || 4173;
 const PUBLIC = path.join(__dirname, "..", "public");
@@ -193,6 +202,31 @@ async function handleApi(req, res, url) {
       const opts = await readBody(req); // { ssid, passwd, id?, name?, sharedKey?, apiEnvType? }
       if (!opts?.ssid) return sendJSON(res, 400, { error: "need { ssid }" });
       return sendJSON(res, 200, await ble.setWifi(opts));
+    }
+    // --- Samsung EMDX frames (local network, MDC over TCP) ---
+    if (req.method === "GET" && url.pathname === "/api/samsung/frames") {
+      return sendJSON(res, 200, { frames: samsungFrames().map((f) => ({ name: f.name || f.host, host: f.host, hasMac: !!f.mac })) });
+    }
+    if (req.method === "POST" && url.pathname === "/api/samsung/status") {
+      const { host } = await readBody(req);
+      const f = samsungFrame(host);
+      if (!f) return sendJSON(res, 404, { error: "unknown samsung host" });
+      return sendJSON(res, 200, await samsung.status(f));
+    }
+    if (req.method === "POST" && url.pathname === "/api/samsung/wake") {
+      const { host } = await readBody(req);
+      const f = samsungFrame(host);
+      if (!f) return sendJSON(res, 404, { error: "unknown samsung host" });
+      await samsung.wake(f);
+      return sendJSON(res, 200, { ok: true });
+    }
+    if (req.method === "POST" && url.pathname === "/api/samsung/upload") {
+      const f = samsungFrame(url.searchParams.get("host"));
+      if (!f) return sendJSON(res, 404, { error: "unknown samsung host" });
+      const buf = await readRawBody(req);
+      if (!buf.length) return sendJSON(res, 400, { error: "empty upload" });
+      const mediaType = req.headers["content-type"] || "image/jpeg";
+      return sendJSON(res, 200, await samsung.showImage(f, buf, { mediaType }));
     }
     return sendJSON(res, 404, { error: "unknown api route" });
   } catch (e) {
