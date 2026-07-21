@@ -17,15 +17,23 @@ const crypto = require("crypto");
 const HEADER_CODE = 0xaa;
 const RESPONSE_CODE = 0xff;
 
-// Best-guess LAN IPv4 the display can reach us on.
-function localIp() {
+// The LAN IPv4 the display can reach us on. When targetHost is given, prefer the
+// interface on the same /24 (so a VMware/WSL virtual adapter isn't chosen over
+// the real Wi-Fi/Ethernet NIC). Link-local 169.254.x is skipped.
+function localIp(targetHost) {
+  const cand = [];
   const nets = os.networkInterfaces();
   for (const name of Object.keys(nets)) {
     for (const n of nets[name] || []) {
-      if (n.family === "IPv4" && !n.internal) return n.address;
+      if (n.family === "IPv4" && !n.internal && !n.address.startsWith("169.254.")) cand.push(n.address);
     }
   }
-  return "127.0.0.1";
+  if (targetHost) {
+    const pfx = targetHost.split(".").slice(0, 3).join(".") + ".";
+    const match = cand.find((a) => a.startsWith(pfx));
+    if (match) return match;
+  }
+  return cand[0] || "127.0.0.1";
 }
 
 function magicPacket(mac, bytes = 6, repetitions = 16) {
@@ -168,7 +176,7 @@ async function status(frame) {
 // display to download it, and resolve once the display has fetched the image.
 function showImage(frame, imageBuffer, { mediaType = "image/jpeg", timeoutMs = 45000 } = {}) {
   return new Promise((resolve, reject) => {
-    const ip = frame.localIp || localIp();
+    const ip = frame.localIp || localIp(frame.host);
     const fileId = crypto.randomUUID().toUpperCase();
     const ext = mediaType.includes("png") ? "png" : "jpg";
     const fileName = `${fileId}.${ext}`;
