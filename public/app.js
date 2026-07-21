@@ -668,8 +668,16 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePrevi
 // ---- BLE direct control (optional) ----
 function bleMsg(text, cls) { const el = $("#bleMsg"); el.className = "result " + (cls || ""); el.textContent = text; }
 function bleSelected() { return $("#bleDevice").value; }
-// The per-frame shared key (only used when the device is in secure mode).
-function bleSharedKey() { return FRAMES.length === 1 ? FRAMES[0].sharedKey : undefined; }
+let BLE_DEVICES = [];
+// The per-frame shared key (required in secure mode). Match the selected BLE
+// device (named "InkP-<serial>") to its cloud frame by serial number.
+function bleSharedKey() {
+  const dev = BLE_DEVICES.find(d => d.id === bleSelected());
+  const serial = dev && dev.name ? dev.name.replace(/^InkP-/, "") : null;
+  const f = serial && FRAMES.find(x => x.serialNumber === serial);
+  if (f) return f.sharedKey;
+  return FRAMES.length === 1 ? FRAMES[0].sharedKey : undefined;
+}
 
 async function bleInit() {
   const btns = ["bleScan", "bleStatus", "bleFetch", "bleGhost", "bleReboot"];
@@ -687,6 +695,7 @@ async function bleScan() {
   const btn = $("#bleScan"); btn.disabled = true; const t = btn.textContent; btn.textContent = "Scanning…";
   bleMsg("Scanning for InkPoster frames over Bluetooth…");
   const res = await api.post("/api/ble/scan", {});
+  BLE_DEVICES = (res.ok && res.data.devices) || [];
   if (res.ok && res.data.devices?.length) {
     $("#bleDevice").innerHTML = res.data.devices.map(d => `<option value="${d.id}">${esc(d.name)} (${d.rssi} dBm)</option>`).join("");
     bleMsg(`Found ${res.data.devices.length} frame(s).`, "ok");

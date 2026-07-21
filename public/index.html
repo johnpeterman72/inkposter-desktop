@@ -75,7 +75,9 @@
           <summary>Direct control over Bluetooth (beta)</summary>
           <p class="muted">Talk to the frame directly over Bluetooth LE — no cloud sync wait. Needs a BLE adapter and the
             <code>@stoprocent/noble</code> package installed on this PC. <b>Fetch now</b> tells the frame to pull its
-            latest assigned image immediately.</p>
+            latest assigned image immediately (this is the instant "sync now" — what the phone app does when you tap the frame).</p>
+          <p class="muted small">⚠ The frame must <b>not</b> be paired in Windows Bluetooth — this app connects to it directly.
+            If a scan finds it but status/fetch fails as "unreachable", remove it from Windows Bluetooth settings. Scans take ~15s (frames advertise slowly).</p>
           <div id="bleUnavailable" class="result err hidden"></div>
           <div class="row">
             <button id="bleScan" class="ghost">Scan for frames</button>
