@@ -10,6 +10,7 @@ const api = {
 let FRAMES = [];
 let selectedCard = null;
 let DRAFT = []; // playlist-in-progress: array of library card objects
+let BLE_OK = false; // whether a BLE backend + adapter is available on this PC
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const short = (id) => id ? id.slice(0, 8) + "…" : "—";
@@ -158,6 +159,7 @@ function renderDevice() {
         <div class="actions"><span class="lbl">Orientation:</span> ${rot("landscape")} ${rot("portrait")}</div>
         <div class="actions">
           <button data-sync="${f.id}">Sync now</button>
+          ${BLE_OK ? `<button data-blefetch="${f.id}" title="Wake the frame over Bluetooth and pull now — instant, like tapping it in the phone app">⚡ Fetch now (BLE)</button>` : ""}
           <button class="ghost" data-refresh="${f.id}" title="Full-panel redraw to clear e-ink ghosting">Clear ghosting</button>
           <label class="inline">Sync every <select data-interval="${f.id}">${intervalOptions(f.syncInterval)}</select></label>
         </div>
@@ -411,6 +413,21 @@ function wireFrameHandlers(container) {
   container.querySelectorAll("[data-fwcheck]").forEach(b => b.addEventListener("click", () => checkFw(b.dataset.fwcheck, b)));
   container.querySelectorAll("[data-fwupdate]").forEach(b => b.addEventListener("click", () => updateFw(b.dataset.fwupdate, b)));
   container.querySelectorAll("[data-transmode],[data-transdiv]").forEach(s => s.addEventListener("change", () => applyTransition(s.dataset.transmode || s.dataset.transdiv)));
+  container.querySelectorAll("[data-blefetch]").forEach(b => b.addEventListener("click", () => bleFetchFrame(b.dataset.blefetch, b)));
+}
+
+// Instant push over Bluetooth: wake the selected frame and pull now. Targets the
+// frame's own BLE device (InkP-<serial>) and signs with its shared key.
+async function bleFetchFrame(frameId, btn) {
+  const f = FRAMES.find(x => x.id === frameId); if (!f) return;
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Connecting…";
+  hint(frameId, "Waking the frame over Bluetooth (scan + connect takes ~15–20s)…");
+  const res = await api.post("/api/ble/fetch", { name: "InkP-" + f.serialNumber, sharedKey: f.sharedKey });
+  hint(frameId, res.ok
+    ? `Fetch sent over Bluetooth (${res.data.usedKey} key). The frame wakes and pulls its current image now.`
+    : "Bluetooth fetch failed: " + (res.data?.error || "unknown") + (/unreachable/i.test(res.data?.error || "") ? " — make sure the frame isn't paired in Windows Bluetooth." : ""));
+  if (res.ok) pollProgress(frameId);
+  btn.disabled = false; btn.textContent = t;
 }
 
 const INTERVALS = [[300, "5 min"], [600, "10 min"], [900, "15 min"], [1800, "30 min"], [3600, "1 hour"], [7200, "2 hours"], [21600, "6 hours"], [43200, "12 hours"], [86400, "24 hours"]];
@@ -683,11 +700,14 @@ async function bleInit() {
   const btns = ["bleScan", "bleStatus", "bleFetch", "bleGhost", "bleReboot"];
   let avail = false;
   try { avail = (await api.get("/api/ble/available")).available; } catch {}
+  BLE_OK = avail;
   if (!avail) {
     const warn = $("#bleUnavailable");
     warn.classList.remove("hidden");
     warn.textContent = "No BLE backend detected. Run `npm install @stoprocent/noble` and turn on Bluetooth, then reload.";
     btns.forEach(id => { const b = $("#" + id); if (b) b.disabled = true; });
+  } else {
+    renderDevice(); // now that BLE is confirmed, show the Device-view "Fetch now (BLE)" button
   }
 }
 
