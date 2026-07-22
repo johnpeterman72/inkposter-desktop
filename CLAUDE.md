@@ -1,99 +1,136 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repo. This file is loaded into every
+session — treat it as the primary handoff / current-state document.
 
 ## What this project is
 
-A local web app to control an **InkPoster e-ink display** from a desktop browser,
-replacing the official iPhone app. Windows 11 host; Node.js for the app.
+A local web app (Windows 11 host, Node.js) to control e-paper art frames from a
+desktop browser, replacing the vendors' phone apps. It started as an **InkPoster**
+controller and now also drives a **Samsung EMDX** e-paper frame — two very
+different device families in one unified UI.
 
-## Critical constraint: there is no public InkPoster API
+- **InkPoster** — controlled through an undocumented **PocketBook/InkPoster cloud
+  API** (`api.inkposter.com`). Content only changes via the cloud; the frame polls
+  the cloud on its `syncInterval`. Additionally reachable directly over **Bluetooth
+  LE** for instant wake/fetch.
+- **Samsung EMDX** — controlled entirely over the **LAN** via Samsung's **MDC
+  protocol** (TCP 1515 → TLS → 6-digit PIN). No cloud.
 
-InkPoster has no documented/public API. The official app drives the display
-through an **undocumented PocketBook/InkPoster cloud backend** — the display
-itself only polls that cloud on a sync interval; it does not take direct commands
-over the LAN. Every capability in this app must be reverse-engineered from the
-cloud API the phone app uses.
+Architecture: a small **zero-runtime-dep Node HTTP server** (`server/`) serves the
+browser UI (`public/`) and proxies `/api/*` to the cloud / BLE / MDC. The browser
+never sees tokens, PINs, or shared keys. `npm start` → http://localhost:4173.
+The one optional dependency is `@stoprocent/noble` for BLE.
 
-Consequences that shape all design decisions:
+## Reverse-engineering discipline
 
-- **Not a pure-browser app.** The cloud API blocks cross-origin (CORS) requests
-  and likely needs auth headers / request signing replicated server-side. The
-  architecture is therefore a **small local Node server** (talks to the cloud
-  API) + a **browser UI** (talks only to the local server). "Open it in my
-  browser" still holds — there's just a local backend.
-- **Discovery before code.** Endpoints, auth flow, and payloads come from
-  capturing the app's own traffic. Do not invent endpoints or guess the auth
-  scheme — build from real captured requests. The auth shape (bearer token vs
-  OAuth vs signed requests) determines the server design, so wait for capture
-  data before scaffolding the server.
+Everything was reverse-engineered from captures + the decompiled Android APK.
+**Do not invent endpoints or auth schemes — build from real captured requests.**
+HAR captures live in `docs/captures/` (gitignored — they contain live tokens;
+some are 150+ MB, parse with `node --max-old-space-size=4096`). Parsers:
+`docs/parse-har.js` (summary + bodies), `parse-har2.js` (endpoints + mutations),
+`parse-har3.js`. Protocol writeups: `docs/reference/CLOUD_API.md`,
+`BLE_PROTOCOL.md`, `APK_ANALYSIS.md`. The decompiled APK + androguard scripts are
+in `docs/reference/apk/` (gitignored, kept for re-analysis).
 
-## Current status
+## Server modules
 
-Working v1. First capture done; API documented in `docs/02-api-notes.md`.
+- `server/index.js` — HTTP server + all `/api/*` routes (zero deps).
+- `server/inkposter.js` — InkPoster cloud client (auth, frames, library, upload, firmware, transition, slideshow).
+- `server/ble.js` — InkPoster BLE control (lazy-loads `@stoprocent/noble`).
+- `server/samsung.js` — Samsung EMDX MDC client (net/tls/dgram/http, zero deps).
 
-- **API base:** `https://api.inkposter.com/api/v1/`, Bearer JWT + `x-header-*`
-  headers. See `server/inkposter.js` for the exact header set.
-- **Architecture:** `server/index.js` (zero-dep Node http server) serves
-  `public/` and proxies a small set of `/api/*` routes to the cloud API via
-  `server/inkposter.js`. The browser never sees the token.
-- **Auth:** `server/config.local.json` (gitignored) holds `{ email, password,
-  token, refreshToken, deviceId }`. The server now **logs in and refreshes
-  automatically** — see below. Access token lasts ~14 days, refresh token ~90.
-- **Run:** `npm start` → http://localhost:4173
+## Current status — what works
 
-Done: list frames, live status, **library browse** (categories → cards →
-show-on-frame, matching the frame's `modelAlias` variant), **rotation**
-(`/user/frame/{id}/update`), show-by-item-id, status refresh.
+### InkPoster over the cloud (fully working; session is live)
+- **Auto login + refresh.** `config.local.json` has `{email, password}`; the server
+  logs in (HMAC-signed with the Android client secret) and refreshes automatically.
+  IMPORTANT: `deviceId` MUST be unique to this server (a fresh UUID) — it was
+  originally the phone's vendor id, which caused the server and phone to fight over
+  one session slot (mutual logout). Now uses its own device id.
+- **Library** browse (categories → cards → show-on-frame, picking the item variant
+  whose `modelAlias` matches the frame). Search filter + `last_id` pagination.
+- **Photo upload** — cloud does the `.ntx` conversion, so we just resize to the
+  frame's exact resolution and `POST /item/convert` (plain JPEG) → poll
+  `/item/is-converted` → `show-on-frame`. Inline "Send new artwork" (drop → preview
+  → **rotate** → push) + a full editor at `/modifier.html`. **The 28.5"
+  (`sharp_28_5`) mounts inverted — rotate 180° before upload** (the app does this).
+- **Firmware update** (`CHECK_FW_UPDATE` → poll `version-check` → `UPDATE_FW`,
+  charging-gated), **image transition** (`pipelineSwitchingMode` 0-4 +
+  `numberOfDivisions` 1/2/4/8/16, pushed via `CHANGE_EPD_TYPE_UPDATE`),
+  **slideshows** (create via `/slideshow/save` + `//item/slideshow-to-frame`, and
+  display), **now-showing** thumbnail, **image-transfer progress** (poll
+  `image-status`), **clear ghosting** (`FULL_SCREEN_UPDATE`), rotation, sync-now.
+- ⚠️ `updateFrame` must echo back ALL settings fields (incl. panel-specific
+  `pipelineSwitchingMode`/`numberOfDivisions`) or the device resets them.
 
-Newer (built from the APK decompile in `docs/reference/`, superseding the two
-"hard, deferred gaps" the old notes listed):
+### InkPoster over BLE (working; needs setup)
+- **`Fetch now (BLE)`** on the Device view = instant sync (wakes the frame + pulls
+  now, exactly what the phone does when you tap it). The cloud can't wake a
+  sleeping frame — BLE is the only instant path.
+- Requires: `npm install @stoprocent/noble` (installed), Bluetooth on, and the
+  frame **NOT paired in Windows Bluetooth** (a Windows bond makes GATT service
+  discovery fail "unreachable"). Scans are an **active scan (allowDuplicates=true)
+  for ~13s** — passive scans on Windows never get the device name, and frames
+  advertise their name slowly.
+- `secureMode: true` frames need the per-device `sharedKey` (from `/user/frames`);
+  the UI matches the BLE device (`InkP-<serial>`) to its frame by serial.
 
-- **Auto login + refresh** (`server/inkposter.js`). Login is HMAC-signed with the
-  Android client secret (`docs/reference/CLOUD_API.md`); refresh presents the
-  **refresh token as the Bearer** + `{deviceId}` (no signing). `ensureToken()`
-  refreshes proactively ~1 day before expiry; `call()` also refreshes+retries on
-  a 401, falling back to a full login. Verified live: the signature is accepted
-  and the account exists (a wrong-password login returns "password were not
-  correct"; a bad signature returns 403 "Wrong signature for client android").
-  Needs the real `password` in config to activate.
-- **Personal-photo upload** — the `.ntx` conversion happens **server-side**, so
-  no on-device encoder is needed. Flow: resize to the frame's exact resolution →
-  multipart `POST /item/convert` (plain JPEG) → poll `POST /item/is-converted` →
-  `POST /item/show-on-frame`. Browser resize/adjust lives in `public/modifier.js`
-  ("Send to display"); server orchestration is `api.uploadAndShow`.
-- **BLE direct control** (`server/ble.js`, optional) — fetch/reboot/ghosting over
-  Bluetooth per `docs/reference/BLE_PROTOCOL.md` (HMAC-framed commands, default
-  vs per-device shared key by `secureMode`). Lazy-loads `@stoprocent/noble`
-  (optionalDependency) and degrades to an "unavailable" message if absent.
-  **Not yet tested against real hardware** — treat as beta.
+### Samsung EMDX over the LAN (protocol working; push blocked by the network)
+- MDC: TCP 1515 → device sends `MDCSTART<<TLS>>` → TLS upgrade → write the 6-digit
+  PIN → `MDCAUTH<<PASS>>`. Frame `AA`-framed commands (battery 0x1B, power 0x11,
+  serial 0x0B, software 0x0E, name 0x67, `setContentDownload` 0xC7).
+- **Status read works** (battery/power/software/serial). Config lives in a
+  `samsungFrames: [{name, host, pin, mac, localIp}]` array in `config.local.json`;
+  the PIN stays server-side.
+- **Image push**: the PC runs a tiny HTTP server serving `content.json` + the
+  image; we send `setContentDownload` pointing at it and the frame pulls over the
+  LAN. **BLOCKED on the current Wi-Fi (`GP_Staff`, client-isolated)** — the frame
+  can't open a connection back to the PC. Needs a **network without client
+  isolation** (home router / phone hotspot). Status/wake work even on the isolated
+  net (PC→frame direction is fine).
+- ⚠️ Sending `setContentDownload` on an isolated network leaves the EMDX **stuck
+  retrying** the unreachable download (it stops answering MDC). It self-recovers or
+  needs a power-cycle. Don't test image push until on a non-isolated network.
 
-Known live-state caveat: the captured tokens currently in config are **dead**
-(the session was superseded server-side — both access and refresh 401 with
-"Device … token is invalid"). Everything cloud-side is locked out until a real
-`password` is added so the server can mint a fresh session.
+## UI (redesigned)
+Sidebar shell: `Device / Library / Playlists / Settings` nav + a unified DISPLAYS
+list (InkPoster + Samsung frames together). Device view centers a large framed
+preview. Dark theme. `public/app.js` (main), `public/modifier.js` (full upload
+editor), `public/style.css`.
 
-HAR parsers in `docs/`: `parse-har.js` (summary), `parse-har2.js` (endpoint list
-+ mutations), `parse-har3.js` (targeted detail with secret masking).
-Captures are large (2nd is 171 MB) — parse with `node --max-old-space-size=4096`.
+## GitHub
+Private repo **github.com/johnpeterman72/inkposter-desktop** (`gh` authed as
+johnpeterman72). Push after committing. `config.local.json`, `docs/captures/`,
+`docs/reference/apk/`, `*.apk`, `node_modules/`, `.claude/settings.local.json`,
+and `server/cache/` are gitignored. There are stray `Gemini_Generated_Image_*.png`
+and `samsung_EMDX_784r.md` files in the root — always stage files explicitly
+(`git add <paths>`), never `git add -A` (it once swept in unintended files).
 
-## Traffic capture workflow
+## How to work here (gotchas learned this session)
+- **Git commit messages:** write the message to `"$TEMP/msg.txt"` then
+  `git commit -F` — `$TMPDIR` is often unset in a fresh Git-Bash shell. `git push`
+  sometimes lingers past the tool timeout but still succeeds — verify with
+  `git status -sb`. CRLF warnings are harmless.
+- **Network/BLE tests buffer stdout** through the tool — run them **backgrounded**
+  writing to a file (`node x.js > out 2>&1 &`), then Read the file. Foreground
+  `sleep` is blocked.
+- **After code changes:** restart `npm start` (server) AND hard-refresh the browser
+  (Ctrl+Shift+R) — `public/*` is cached.
+- **Samsung PIN:** don't brute-force it (MDC blocks after a few bad tries with
+  `FAIL:0x02`). The real PIN was `000000` (default), not the app-shown code.
+- To verify UI without live devices, inject mock frames via the browser
+  `javascript_tool` and call the render functions.
 
-`docs/01-capture-guide.md` is the authoritative walkthrough (mitmproxy on the PC,
-iPhone routed through it, cert installed, app actions recorded). Captures land in
-`docs/captures/` as `.mitm` or `.har` files.
-
-- These captures contain **live auth tokens** — treat `docs/captures/` as secret;
-  never commit its contents.
-- The main risk that can block the project is **TLS certificate pinning** in the
-  app. If a capture shows failed/errored TLS flows to the InkPoster host, that's
-  pinning — flag it rather than working around it silently; the fallbacks are
-  heavier (Android emulator + Frida SSL-unpin, or probing the display on the LAN).
+## Open items / possible next steps
+- Samsung **image push**: retry once both PC + EMDX are on a non-isolated network.
+- Samsung Device view is status + upload only (no library/playlists — those are
+  InkPoster-cloud concepts). Power-state command returns an unmapped value ("?").
+- Deferred/nice-to-have: bind the server to `127.0.0.1` + Origin check (currently
+  binds all interfaces); "My Images" gallery for private uploads (needs a capture
+  of the app's private-images endpoint, `getPrivateImagesWithCropParamsFlow`);
+  scheduling/automation; light-mode.
 
 ## Commands
-
-- `node --version` → v25.x, `python --version` → 3.12 (both preinstalled).
-- Capture: `pip install mitmproxy`, then `mitmweb --listen-port 8080` (web UI) or
-  `mitmdump -w docs/captures/inkposter_capture.mitm` (headless to file).
-
-No build/test tooling exists yet; add it alongside the first `server/` code.
+- `node --version` → v25.x, `python` → 3.12. `npm start` → http://localhost:4173.
+- Capture: ProxyPin/mitmproxy on the iPhone → export HAR into `docs/captures/`.

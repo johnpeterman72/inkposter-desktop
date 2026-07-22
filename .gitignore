@@ -5,6 +5,10 @@ server/config.local.json
 server/cache/
 .env
 
+# stray local files in the repo root (personal notes / generated images)
+/samsung_EMDX_784r.md
+/Gemini_Generated_Image_*.png
+
 # Local machine-specific Claude Code settings (permission allowlist, etc.)
 .claude/settings.local.json
 
