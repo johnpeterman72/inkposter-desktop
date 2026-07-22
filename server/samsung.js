@@ -63,25 +63,29 @@ class Device {
     });
   }
 
-  connect() {
+  connect(timeoutMs = 8000) {
     if (this._connected) return Promise.resolve();
     if (this._connectPromise) return this._connectPromise;
     this._connectPromise = new Promise((resolve, reject) => {
       const tcp = net.connect({ host: this.host, port: this.port, rejectUnauthorized: false });
       this._tcp = tcp;
-      const to = setTimeout(() => reject(new Error("connect timed out")), 10000);
+      let settled = false;
+      const fail = (e) => { if (settled) return; settled = true; clearTimeout(to); try { tcp.destroy(); } catch {} reject(e); };
+      const ok = () => { if (settled) return; settled = true; clearTimeout(to); resolve(); };
+      // Accepts TCP but no MDCSTART = display busy (stuck download) or asleep.
+      const to = setTimeout(() => fail(new Error("connect timed out (display busy or asleep?)")), timeoutMs);
       tcp.on("data", (data) => {
         if (`${data}` === "MDCSTART<<TLS>>") {
           const tlsSock = tls.connect({ socket: tcp, rejectUnauthorized: false }, () => {
-            tlsSock.write(Buffer.from(this.pin), (err) => { if (err) reject(err); });
+            tlsSock.write(Buffer.from(this.pin), (err) => { if (err) fail(err); });
           });
           this._tls = tlsSock;
-          tlsSock.on("data", (d) => this._onData(d, resolve, reject, to));
-          tlsSock.once("error", reject);
+          tlsSock.on("data", (d) => this._onData(d, ok, fail, to));
+          tlsSock.once("error", fail);
         }
       });
-      tcp.on("error", reject);
-      tcp.once("close", () => reject(new Error("connection closed")));
+      tcp.on("error", fail);
+      tcp.once("close", () => fail(new Error("connection closed")));
     }).then(() => {
       this._connectPromise = null; this._connected = true;
     });

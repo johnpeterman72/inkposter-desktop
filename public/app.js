@@ -39,6 +39,10 @@ let STATUS = {}, FW = {};
 function flatten(arr) { const o = {}; (Array.isArray(arr) ? arr : []).forEach(x => Object.entries(x).forEach(([k, v]) => (o[k] = v))); return o; }
 
 let SELECTED = null;
+// Samsung EMDX frames live alongside InkPoster ones. Selection is either an
+// InkPoster frame (SEL_TYPE "inkposter", SELECTED = id) or a Samsung frame
+// (SEL_TYPE "samsung", SEL_HOST = host).
+let SAMSUNG = [], SEL_TYPE = "inkposter", SEL_HOST = null, SAM_STATUS = {};
 
 // Switch the visible view (Device / Library / Playlists / Settings).
 function showView(name) {
@@ -47,13 +51,17 @@ function showView(name) {
 }
 
 async function loadFrames() {
-  const [framesResp, statusResp, fwResp] = await Promise.all([
+  const [framesResp, statusResp, fwResp, samResp] = await Promise.all([
     api.get("/api/frames"), api.get("/api/status"), api.get("/api/version-check").catch(() => []),
+    api.get("/api/samsung/frames").catch(() => ({ frames: [] })),
   ]);
   FRAMES = framesResp.frames || [];
+  SAMSUNG = (samResp && samResp.frames) || [];
   STATUS = flatten(statusResp);
   FW = flatten(fwResp);
   if (!FRAMES.find(f => f.id === SELECTED)) SELECTED = FRAMES[0]?.id || null;
+  // No InkPoster frames but a Samsung one exists → select it.
+  if (!FRAMES.length && SAMSUNG.length && SEL_TYPE === "inkposter") { SEL_TYPE = "samsung"; SEL_HOST = SAMSUNG[0].host; }
 
   renderSidebarDevices();
   renderDevice();
@@ -64,26 +72,44 @@ async function loadFrames() {
       FRAMES.map(f => `<option value="${f.id}">${esc(f.frameName)}</option>`).join("");
     if (SELECTED) tgt.value = SELECTED;
   }
+  if (SEL_TYPE === "samsung" && SEL_HOST) samsungStatus(SEL_HOST);
 }
 
 const selectedFrame = () => FRAMES.find(f => f.id === SELECTED) || FRAMES[0];
 
-// Sidebar list of displays (name, battery, link status). Click selects.
+// Sidebar list of displays — InkPoster (cloud) + Samsung (LAN), one unified list.
 function renderSidebarDevices() {
   const el = $("#devlist"); if (!el) return;
-  if (!FRAMES.length) { el.innerHTML = `<div class="side-label">Displays</div><div class="muted small">None found</div>`; return; }
-  el.innerHTML = `<div class="side-label">Displays</div>` + FRAMES.map(f => {
+  const ink = FRAMES.map(f => {
     const s = STATUS[f.id] || {};
     const bat = s.batteryCapacity != null ? s.batteryCapacity + "%" : "—";
     const link = s.wifiSignalStrength != null ? "on" : "off";
-    return `<button class="devitem ${f.id === SELECTED ? "on" : ""}" data-dev="${f.id}">
+    const on = SEL_TYPE === "inkposter" && f.id === SELECTED;
+    return `<button class="devitem ${on ? "on" : ""}" data-dev="${f.id}">
       <span class="dot ${link}"></span>
       <span class="dname">${esc(f.frameName)}</span>
       <span class="dbat">${bat}${s.isCharging ? " ⚡" : ""}</span>
     </button>`;
-  }).join("") + `<button class="devitem pair" title="Pairing a new frame still needs the phone app for now" disabled>+ Pair a device</button>`;
+  }).join("");
+  const sam = SAMSUNG.map(f => {
+    const st = SAM_STATUS[f.host] || {};
+    const bat = st.battery != null ? st.battery + "%" : "—";
+    const on = SEL_TYPE === "samsung" && f.host === SEL_HOST;
+    return `<button class="devitem ${on ? "on" : ""}" data-sam="${f.host}" title="Samsung EMDX (LAN)">
+      <span class="dot ${st.battery != null ? "on" : "off"}"></span>
+      <span class="dname">${esc(f.name)}</span>
+      <span class="dbat">${bat}${st.pluggedIn ? " ⚡" : ""}</span>
+    </button>`;
+  }).join("");
+  if (!ink && !sam) { el.innerHTML = `<div class="side-label">Displays</div><div class="muted small">None found</div>`; return; }
+  el.innerHTML = `<div class="side-label">Displays</div>` + ink + sam +
+    `<button class="devitem pair" title="Pairing a new frame still needs the phone app for now" disabled>+ Pair a device</button>`;
   el.querySelectorAll("[data-dev]").forEach(b => b.addEventListener("click", () => {
-    SELECTED = b.dataset.dev; renderSidebarDevices(); renderDevice(); showView("device");
+    SEL_TYPE = "inkposter"; SELECTED = b.dataset.dev; renderSidebarDevices(); renderDevice(); showView("device");
+  }));
+  el.querySelectorAll("[data-sam]").forEach(b => b.addEventListener("click", () => {
+    SEL_TYPE = "samsung"; SEL_HOST = b.dataset.sam; renderSidebarDevices(); renderDevice(); showView("device");
+    samsungStatus(SEL_HOST);
   }));
 }
 
@@ -99,6 +125,7 @@ function mountStyle(f) {
 // The Device view: big framed current-artwork preview + all device controls.
 function renderDevice() {
   const host = $("#device-detail"); if (!host) return;
+  if (SEL_TYPE === "samsung") return renderSamsungDevice();
   const f = selectedFrame();
   if (!f) {
     host.innerHTML = `<div class="empty"><h1>No displays found</h1>
@@ -171,6 +198,156 @@ function renderDevice() {
     </div>`;
   wireFrameHandlers(host);
   wireQuickSend(f);
+}
+
+// ---- Samsung EMDX device view (LAN, MDC) ----
+function renderSamsungDevice() {
+  const host = $("#device-detail"); if (!host) return;
+  const f = SAMSUNG.find(x => x.host === SEL_HOST) || SAMSUNG[0];
+  if (!f) { host.innerHTML = `<div class="empty"><h1>No Samsung frame</h1></div>`; return; }
+  const st = SAM_STATUS[f.host] || {};
+  const bat = st.battery != null ? `Battery ${st.battery}%${st.pluggedIn ? " ⚡" : ""}`
+    : st._loading ? "reading…" : st._error ? "unreachable" : "battery —";
+  host.innerHTML = `
+    <div class="stage-head">
+      <div>
+        <h1>${esc(f.name)}</h1>
+        <div class="statusline">
+          <span class="chip2">Samsung e-paper · LAN</span>
+          <span class="chip2 ${st.battery != null ? "ok" : ""}">${bat}</span>
+          ${st.software ? `<span class="chip2">${esc(st.software)}</span>` : ""}
+        </div>
+      </div>
+      <div class="head-actions">
+        ${f.hasMac ? `<button class="ghost" id="sam-wake">Wake</button>` : ""}
+        <button class="ghost" id="sam-refresh">Refresh</button>
+      </div>
+    </div>
+    <div class="device-grid">
+      <div class="hero">
+        <div class="frame-mount" style="aspect-ratio: 4 / 3; width:min(100%, calc(58vh * 1.3333))">
+          <span class="ph">Samsung EMDX<br><small>the panel doesn't report its current image</small></span>
+        </div>
+        <div class="hero-cap"><span class="muted">${f.host}${st.serial ? " · " + esc(st.serial) : ""}</span></div>
+      </div>
+      <div class="side">
+        <div class="sendcard" id="sam-sendcard">
+          <div class="drop" id="sam-drop">
+            <b>Send new artwork</b>
+            <span class="muted small">Drop a photo or <label class="link">browse<input type="file" id="sam-file" accept="image/*" hidden></label></span>
+            <span class="muted small">Pushed to the panel over your LAN (needs a network without client isolation).</span>
+          </div>
+          <div id="sam-msg" class="result"></div>
+        </div>
+        <div class="stats">
+          <div class="stat battery"><div class="k">Battery${st.pluggedIn ? " ⚡" : ""}</div><div class="v">${st.battery != null ? st.battery + "%" : "—"}</div></div>
+          <div class="stat"><div class="k">Power</div><div class="v">${st.pluggedIn ? "on power" : (st.battery != null ? "on battery" : "—")}</div></div>
+          <div class="stat"><div class="k">Software</div><div class="v">${esc(st.software || "—")}</div></div>
+          <div class="stat"><div class="k">Serial</div><div class="v" title="${esc(st.serial || "")}">${st.serial ? short(st.serial) : "—"}</div></div>
+        </div>
+        <div class="hint" id="sam-hint"></div>
+      </div>
+    </div>`;
+  const wake = $("#sam-wake"); if (wake) wake.addEventListener("click", () => samsungWake(f, wake));
+  $("#sam-refresh").addEventListener("click", () => samsungStatus(f.host, true));
+  wireSamsungSend(f);
+}
+
+const samHint = (text) => { const el = $("#sam-hint"); if (el) el.textContent = text; };
+
+// Fetch Samsung status over MDC (a live connect each time — do it on select/refresh, not in a poll loop).
+async function samsungStatus(host, force) {
+  const cur = SAM_STATUS[host];
+  if (cur && cur.software && !force) return; // already loaded
+  SAM_STATUS[host] = { ...(cur || {}), _loading: true };
+  if (SEL_TYPE === "samsung" && SEL_HOST === host) renderSamsungDevice();
+  const res = await api.post("/api/samsung/status", { host });
+  SAM_STATUS[host] = res.ok ? res.data : { _error: res.data?.error || "unreachable" };
+  if (SEL_TYPE === "samsung" && SEL_HOST === host) renderSamsungDevice();
+  renderSidebarDevices();
+}
+
+async function samsungWake(f, btn) {
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Waking…";
+  const res = await api.post("/api/samsung/wake", { host: f.host });
+  samHint(res.ok ? "Wake-on-LAN sent. Give it a few seconds, then Refresh." : "Wake failed: " + (res.data?.error || "unknown"));
+  setTimeout(() => { btn.disabled = false; btn.textContent = t; }, 1500);
+}
+
+// --- Samsung upload: pick/drop → preview + rotate → push over the LAN ---
+let SAM_UPLOAD = null; // { img, deg }
+function wireSamsungSend(f) {
+  const file = $("#sam-file"), drop = $("#sam-drop");
+  if (!file) return;
+  const handle = (fl) => { if (fl) samStart(f, fl); };
+  file.addEventListener("change", e => handle(e.target.files[0]));
+  if (drop) {
+    ["dragover", "dragenter"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+    ["dragleave", "dragend"].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove("over")));
+    drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); handle(e.dataTransfer.files[0]); });
+  }
+}
+function samStart(f, file) {
+  const img = new Image();
+  img.onload = () => { URL.revokeObjectURL(img.src); SAM_UPLOAD = { img, deg: 0 }; samShowPreview(f); };
+  img.onerror = () => alert("Could not read that image.");
+  img.src = URL.createObjectURL(file);
+}
+function samShowPreview(f) {
+  const card = $("#sam-sendcard"); if (!card || !SAM_UPLOAD) return;
+  card.innerHTML = `
+    <div class="uprev"><canvas id="sam-canvas"></canvas></div>
+    <div class="row" style="justify-content:center">
+      <button class="ghost" id="sam-rotate">Rotate 90°</button>
+      <button id="sam-push">Push to panel</button>
+      <button class="ghost" id="sam-cancel">Cancel</button>
+    </div>
+    <div id="sam-msg" class="result"></div>`;
+  samDrawPreview();
+  $("#sam-rotate").addEventListener("click", () => { SAM_UPLOAD.deg = (SAM_UPLOAD.deg + 90) % 360; samDrawPreview(); });
+  $("#sam-push").addEventListener("click", () => samPush(f));
+  $("#sam-cancel").addEventListener("click", () => { SAM_UPLOAD = null; renderSamsungDevice(); });
+}
+// Rotate + cap the long edge (the panel scales it), preserving aspect. Returns a canvas.
+function samToCanvas(img, deg, maxDim = 2048) {
+  const swap = deg === 90 || deg === 270;
+  let W = swap ? img.height : img.width, H = swap ? img.width : img.height;
+  const scale = Math.min(1, maxDim / Math.max(W, H));
+  W = Math.round(W * scale); H = Math.round(H * scale);
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate(deg * Math.PI / 180); ctx.imageSmoothingQuality = "high";
+  const dw = swap ? H : W, dh = swap ? W : H;
+  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
+  return c;
+}
+function samDrawPreview() {
+  const dst = $("#sam-canvas"); if (!dst || !SAM_UPLOAD) return;
+  const full = samToCanvas(SAM_UPLOAD.img, SAM_UPLOAD.deg);
+  const maxW = 300, scale = Math.min(1, maxW / full.width);
+  dst.width = Math.round(full.width * scale); dst.height = Math.round(full.height * scale);
+  dst.getContext("2d").drawImage(full, 0, 0, dst.width, dst.height);
+}
+async function samPush(f) {
+  const msg = $("#sam-msg");
+  $("#sam-push").disabled = true; $("#sam-rotate").disabled = true;
+  msg.className = "result"; msg.textContent = "Sending to the panel over your LAN (can take ~30s)…";
+  try {
+    const full = samToCanvas(SAM_UPLOAD.img, SAM_UPLOAD.deg);
+    const blob = await new Promise((res, rej) => full.toBlob(b => b ? res(b) : rej(new Error("encode failed")), "image/jpeg", 0.9));
+    const r = await fetch(`/api/samsung/upload?host=${encodeURIComponent(f.host)}`, { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `upload failed (${r.status})`);
+    msg.className = "result ok"; msg.textContent = "Sent! The panel is refreshing (e-paper takes a few seconds).";
+    SAM_UPLOAD = null;
+    setTimeout(() => renderSamsungDevice(), 3000);
+  } catch (e) {
+    msg.className = "result err";
+    msg.textContent = "Error: " + e.message + (/never fetched|reach|isolation/i.test(e.message) ? " — the panel couldn't reach this PC (client-isolated network?)." : "");
+    $("#sam-push").disabled = false; $("#sam-rotate").disabled = false;
+  }
 }
 
 // --- Inline "quick send": drop/pick a photo, resize to the frame, push ---
