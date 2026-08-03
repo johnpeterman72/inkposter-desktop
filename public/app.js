@@ -178,8 +178,19 @@ function renderDevice() {
 
 // --- Inline "quick send": drop/pick a photo, resize to the frame, push ---
 let UPLOAD = null; // { img, deg }
-// Panels the app rotates 180° before conversion (else images land upside-down).
-const needs180 = (f) => !!f && f.modelAlias === "sharp_28_5";
+// Rotation the panel pipeline needs baked into the upload — applied at upload
+// time only, never in the preview (the preview shows what the wall will show):
+// - sharp_28_5 mounts inverted → +180 (matches the official app)
+// - portrait uploads are drawn 180° off vs landscape by the cloud/panel
+//   (verified empirically on the 31.5", Aug 2026) → +180
+const panelFix = (f) => !!f && ((f.modelAlias === "sharp_28_5" ? 180 : 0) + (f.orientation === "portrait" ? 180 : 0)) % 360 === 180;
+const rot180 = (src) => {
+  const c = document.createElement("canvas"); c.width = src.width; c.height = src.height;
+  const ctx = c.getContext("2d");
+  ctx.translate(src.width / 2, src.height / 2); ctx.rotate(Math.PI);
+  ctx.drawImage(src, -src.width / 2, -src.height / 2);
+  return c;
+};
 
 function wireQuickSend(f) {
   const file = $("#quickfile"), drop = $("#dropzone");
@@ -201,7 +212,7 @@ async function startQuickSend(f, file) {
   status("Reading photo…");
   try {
     const img = await loadImageFile(file, status);
-    UPLOAD = { img, deg: needs180(f) ? 180 : 0 };
+    UPLOAD = { img, deg: 0 };
     showUploadPreview(f);
   } catch (e) {
     if (msg) { msg.className = "result err"; msg.textContent = "Could not read that image: " + e.message; }
@@ -238,7 +249,8 @@ async function pushUpload(f) {
   $("#upush").disabled = true; $("#urotate").disabled = true;
   msg.className = "result"; msg.textContent = "Uploading & converting on the cloud (~10–30s)…";
   try {
-    const full = processToCanvas(UPLOAD.img, f, UPLOAD.deg);
+    let full = processToCanvas(UPLOAD.img, f, UPLOAD.deg);
+    if (panelFix(f)) full = rot180(full);
     const blob = await new Promise((res, rej) => full.toBlob(b => b ? res(b) : rej(new Error("encode failed")), "image/jpeg", 0.92));
     const r = await fetch(`/api/upload?frame=${encodeURIComponent(f.id)}&name=photo.jpg`, {
       method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob,

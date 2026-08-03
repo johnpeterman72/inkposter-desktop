@@ -53,8 +53,15 @@ in `docs/reference/apk/` (gitignored, kept for re-analysis).
 - **Photo upload** — cloud does the `.ntx` conversion, so we just resize to the
   frame's exact resolution and `POST /item/convert` (plain JPEG) → poll
   `/item/is-converted` → `show-on-frame`. Inline "Send new artwork" (drop → preview
-  → **rotate** → push) + a full editor at `/modifier.html`. **The 28.5"
-  (`sharp_28_5`) mounts inverted — rotate 180° before upload** (the app does this).
+  → **rotate** → push) + a full editor at `/modifier.html`.
+- **Panel rotation quirks (`panelFix`)** — two independent +180°s, applied ONLY at
+  upload time (previews and the PNG download always show wall-view, upright):
+  (1) the 28.5" `sharp_28_5` mounts inverted (+180, matches the official app);
+  (2) **portrait-shaped uploads are drawn 180° off vs landscape** by the
+  cloud/panel `.ntx` pipeline (+180) — found Aug 3 2026 when the first-ever
+  portrait upload landed upside-down on the 31.5"; verified by re-pushing the same
+  image flipped. Net effect: 31.5" portrait → 180; 28.5" landscape → 180;
+  28.5" portrait → net 0 (**this combination is predicted, not yet observed**).
 - **iPhone HEIC + RAW input** — both upload paths load files through
   `public/imageload.js` (`window.loadImageFile`). HEIC/HEIF decodes in-browser via
   the vendored `public/vendor/heic2any.min.js` (libheif WASM, lazy-loaded on first

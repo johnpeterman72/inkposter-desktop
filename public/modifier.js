@@ -153,6 +153,24 @@ function blit(dst, src) {
 const canvasToBlob = (canvas, type, q) =>
   new Promise((resolve) => canvas.toBlob(resolve, type, q));
 
+// Rotation the panel pipeline needs baked into the upload — applied here only,
+// never in the previews or the PNG download (those show what the wall shows):
+// sharp_28_5 mounts inverted (+180); portrait uploads are drawn 180° off vs
+// landscape by the cloud/panel (verified on the 31.5", Aug 2026) (+180).
+function panelFix(frameId) {
+  const f = FRAMES.find((x) => x.id === frameId);
+  const mount = f && f.modelAlias === "sharp_28_5" ? 180 : 0;
+  const orient = $("#orient").value === "portrait" ? 180 : 0;
+  return (mount + orient) % 360 === 180;
+}
+function rot180(src) {
+  const c = document.createElement("canvas"); c.width = src.width; c.height = src.height;
+  const ctx = c.getContext("2d");
+  ctx.translate(src.width / 2, src.height / 2); ctx.rotate(Math.PI);
+  ctx.drawImage(src, -src.width / 2, -src.height / 2);
+  return c;
+}
+
 // Upload the adjusted (non-dithered) image to the selected frame.
 async function sendToDisplay() {
   const frame = $("#frame").value;
@@ -162,7 +180,8 @@ async function sendToDisplay() {
   btn.disabled = true; const label = btn.textContent;
   try {
     setMsg("Preparing image…");
-    const blob = await canvasToBlob(window.__adjusted, "image/jpeg", 0.92);
+    const up = panelFix(frame) ? rot180(window.__adjusted) : window.__adjusted;
+    const blob = await canvasToBlob(up, "image/jpeg", 0.92);
     btn.textContent = "Uploading…";
     setMsg("Uploading & converting on the cloud (this can take ~10–30s)…");
     const res = await fetch(`/api/upload?frame=${encodeURIComponent(frame)}&name=photo.jpg`, {
@@ -204,9 +223,9 @@ async function loadFrames() {
 function syncOrientToFrame() {
   const f = FRAMES.find((x) => x.id === $("#frame").value);
   if (f && f.orientation) $("#orient").value = f.orientation;
-  // Sensible default: the 28.5" mounts inverted, so start at 180° (overridable
-  // live in the preview). Every other frame starts at 0°.
-  if ($("#rot")) $("#rot").value = (f && f.modelAlias === "sharp_28_5") ? "180" : "0";
+  // Rotate is a purely artistic control now — panel quirks (inverted mount,
+  // portrait mapping) are compensated automatically in sendToDisplay.
+  if ($("#rot")) $("#rot").value = "0";
   render();
 }
 
