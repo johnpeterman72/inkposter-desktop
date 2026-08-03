@@ -14,14 +14,15 @@
 
   <main>
     <section class="panel">
-      <p class="muted">Crop & size a photo to your display (<b id="dim">2560×1440</b>) and preview how it
+      <p class="muted">Crop & size a photo to your display (<b id="dim">2560×1440</b>) — iPhone HEIC and
+        RAW/ProRAW (.dng) load directly — and preview how it
         will look on the 6-colour Spectra e-ink panel — using the app's own adjustment recipe
         (<code>saturation +45, brightness −4, contrast +7, gamma 0.6</code>).
         <b>Send to display</b> uploads the <em>adjusted</em> image (left preview); the frame's cloud
         does its own e-ink conversion, so the dither view is just a preview.</p>
 
       <div class="row">
-        <label>Photo <input id="file" type="file" accept="image/*" /></label>
+        <label>Photo <input id="file" type="file" accept="image/*,.heic,.heif,.dng" /></label>
         <label>Display
           <select id="frame"><option value="">Loading…</option></select>
         </label>
@@ -68,6 +69,7 @@
       <p id="msg" class="muted">Choose a photo to begin.</p>
     </section>
   </main>
+  <script src="/imageload.js"></script>
   <script src="/modifier.js"></script>
 </body>
 </html>

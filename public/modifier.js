@@ -210,12 +210,15 @@ function syncOrientToFrame() {
   render();
 }
 
-$("#file").addEventListener("change", (e) => {
+$("#file").addEventListener("change", async (e) => {
   const f = e.target.files[0]; if (!f) return;
-  const url = URL.createObjectURL(f);
-  img = new Image();
-  img.onload = () => { URL.revokeObjectURL(url); render(); };
-  img.src = url;
+  setMsg("Loading photo…");
+  try {
+    img = await loadImageFile(f, setMsg); // handles HEIC/HEIF + RAW (.dng) too
+    render();
+  } catch (err) {
+    setMsg("Could not read that photo: " + err.message, true);
+  }
 });
 ["orient", "fit", "rot", "sat", "bri", "con", "gam", "eink"].forEach(id =>
   $("#" + id).addEventListener("input", render));

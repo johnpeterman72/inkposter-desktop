@@ -1,0 +1,4 @@
+heic2any.min.js — https://github.com/alexcorvi/heic2any (v0.0.4)
+MIT License, Copyright (c) Alex Corvi.
+Bundles libheif (https://github.com/strukturag/libheif, LGPL-3.0) compiled to JS,
+which bundles libde265 (LGPL-3.0). Used unmodified, loaded as a separate file.

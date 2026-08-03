@@ -5,21 +5,22 @@ session — treat it as the primary handoff / current-state document.
 
 ## What this project is
 
-A local web app (Windows 11 host, Node.js) to control e-paper art frames from a
-desktop browser, replacing the vendors' phone apps. It started as an **InkPoster**
-controller and now also drives a **Samsung EMDX** e-paper frame — two very
-different device families in one unified UI.
+A local web app (Windows 11 host, Node.js) to control **InkPoster** e-paper art
+frames from a desktop browser, replacing the vendor's phone app.
 
 - **InkPoster** — controlled through an undocumented **PocketBook/InkPoster cloud
   API** (`api.inkposter.com`). Content only changes via the cloud; the frame polls
   the cloud on its `syncInterval`. Additionally reachable directly over **Bluetooth
   LE** for instant wake/fetch.
-- **Samsung EMDX** — controlled entirely over the **LAN** via Samsung's **MDC
-  protocol** (TCP 1515 → TLS → 6-digit PIN). No cloud.
+- **Samsung EMDX support was removed** (Aug 2026, "abandon the samsung display").
+  The MDC client, `/api/samsung/*` routes, and Samsung UI are gone — recover from
+  git history (commits ≤ `05b6286`) if ever needed. Leftover `samsungFrames` in
+  `config.local.json` is ignored; the stray `samsung_EMDX_784r.md` in the root and
+  the MDC research notes were part of that effort.
 
 Architecture: a small **zero-runtime-dep Node HTTP server** (`server/`) serves the
-browser UI (`public/`) and proxies `/api/*` to the cloud / BLE / MDC. The browser
-never sees tokens, PINs, or shared keys. `npm start` → http://localhost:4173.
+browser UI (`public/`) and proxies `/api/*` to the cloud / BLE. The browser
+never sees tokens or shared keys. `npm start` → http://localhost:4173.
 The one optional dependency is `@stoprocent/noble` for BLE.
 
 ## Reverse-engineering discipline
@@ -38,7 +39,6 @@ in `docs/reference/apk/` (gitignored, kept for re-analysis).
 - `server/index.js` — HTTP server + all `/api/*` routes (zero deps).
 - `server/inkposter.js` — InkPoster cloud client (auth, frames, library, upload, firmware, transition, slideshow).
 - `server/ble.js` — InkPoster BLE control (lazy-loads `@stoprocent/noble`).
-- `server/samsung.js` — Samsung EMDX MDC client (net/tls/dgram/http, zero deps).
 
 ## Current status — what works
 
@@ -55,6 +55,16 @@ in `docs/reference/apk/` (gitignored, kept for re-analysis).
   `/item/is-converted` → `show-on-frame`. Inline "Send new artwork" (drop → preview
   → **rotate** → push) + a full editor at `/modifier.html`. **The 28.5"
   (`sharp_28_5`) mounts inverted — rotate 180° before upload** (the app does this).
+- **iPhone HEIC + RAW input** — both upload paths load files through
+  `public/imageload.js` (`window.loadImageFile`). HEIC/HEIF decodes in-browser via
+  the vendored `public/vendor/heic2any.min.js` (libheif WASM, lazy-loaded on first
+  HEIC; native decode tried first for Safari). RAW/ProRAW `.dng` is NOT demosaiced —
+  we parse the TIFF/DNG IFD tree and extract the largest embedded JPEG preview
+  (ProRAW previews are full-resolution 4032×3024; brute FFD8-scan as fallback).
+  Orientation: the browser applies the extracted JPEG's own EXIF; the DNG's IFD0
+  orientation tag is baked in only when the preview lacks EXIF (no double-rotate).
+  Older third-party-app DNGs may only embed a small preview (e.g. 852×640) — known
+  soft-output limitation. Verified live with a real ProRAW (iPhone 12 Pro) + HEIC.
 - **Firmware update** (`CHECK_FW_UPDATE` → poll `version-check` → `UPDATE_FW`,
   charging-gated), **image transition** (`pipelineSwitchingMode` 0-4 +
   `numberOfDivisions` 1/2/4/8/16, pushed via `CHANGE_EPD_TYPE_UPDATE`),
@@ -76,28 +86,11 @@ in `docs/reference/apk/` (gitignored, kept for re-analysis).
 - `secureMode: true` frames need the per-device `sharedKey` (from `/user/frames`);
   the UI matches the BLE device (`InkP-<serial>`) to its frame by serial.
 
-### Samsung EMDX over the LAN (protocol working; push blocked by the network)
-- MDC: TCP 1515 → device sends `MDCSTART<<TLS>>` → TLS upgrade → write the 6-digit
-  PIN → `MDCAUTH<<PASS>>`. Frame `AA`-framed commands (battery 0x1B, power 0x11,
-  serial 0x0B, software 0x0E, name 0x67, `setContentDownload` 0xC7).
-- **Status read works** (battery/power/software/serial). Config lives in a
-  `samsungFrames: [{name, host, pin, mac, localIp}]` array in `config.local.json`;
-  the PIN stays server-side.
-- **Image push**: the PC runs a tiny HTTP server serving `content.json` + the
-  image; we send `setContentDownload` pointing at it and the frame pulls over the
-  LAN. **BLOCKED on the current Wi-Fi (`GP_Staff`, client-isolated)** — the frame
-  can't open a connection back to the PC. Needs a **network without client
-  isolation** (home router / phone hotspot). Status/wake work even on the isolated
-  net (PC→frame direction is fine).
-- ⚠️ Sending `setContentDownload` on an isolated network leaves the EMDX **stuck
-  retrying** the unreachable download (it stops answering MDC). It self-recovers or
-  needs a power-cycle. Don't test image push until on a non-isolated network.
-
 ## UI (redesigned)
-Sidebar shell: `Device / Library / Playlists / Settings` nav + a unified DISPLAYS
-list (InkPoster + Samsung frames together). Device view centers a large framed
-preview. Dark theme. `public/app.js` (main), `public/modifier.js` (full upload
-editor), `public/style.css`.
+Sidebar shell: `Device / Library / Playlists / Settings` nav + a DISPLAYS list.
+Device view centers a large framed preview. Dark theme. `public/app.js` (main),
+`public/modifier.js` (full upload editor), `public/imageload.js` (shared
+HEIC/DNG-capable photo loader), `public/style.css`.
 
 ## GitHub
 Private repo **github.com/johnpeterman72/inkposter-desktop** (`gh` authed as
@@ -117,15 +110,14 @@ and `samsung_EMDX_784r.md` files in the root — always stage files explicitly
   `sleep` is blocked.
 - **After code changes:** restart `npm start` (server) AND hard-refresh the browser
   (Ctrl+Shift+R) — `public/*` is cached.
-- **Samsung PIN:** don't brute-force it (MDC blocks after a few bad tries with
-  `FAIL:0x02`). The real PIN was `000000` (default), not the app-shown code.
 - To verify UI without live devices, inject mock frames via the browser
-  `javascript_tool` and call the render functions.
+  `javascript_tool` and call the render functions. To test file uploads without a
+  native picker, `fetch` a file staged in `public/`, wrap it in a `File` +
+  `DataTransfer`, assign to the input's `.files`, and dispatch `change`.
+- Test assets for the image loader (real ProRAW .dng from raw.pixls.us, HEIC from
+  nokiatech) download fine with curl — see the Aug 2026 HEIC/DNG commit message.
 
 ## Open items / possible next steps
-- Samsung **image push**: retry once both PC + EMDX are on a non-isolated network.
-- Samsung Device view is status + upload only (no library/playlists — those are
-  InkPoster-cloud concepts). Power-state command returns an unmapped value ("?").
 - Deferred/nice-to-have: bind the server to `127.0.0.1` + Origin check (currently
   binds all interfaces); "My Images" gallery for private uploads (needs a capture
   of the app's private-images endpoint, `getPrivateImagesWithCropParamsFlow`);
