@@ -216,6 +216,17 @@ const server = http.createServer((req, res) => {
   serveStatic(res, url.pathname);
 });
 
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE") {
+    console.error(
+      `\n  ⚠  InkPoster Desktop is ALREADY RUNNING on port ${PORT}.\n` +
+      `     http://localhost:${PORT} works — it's served by the other instance.\n` +
+      `     Close the other window first if you meant to restart the server.\n`);
+    process.exit(1);
+  }
+  throw e;
+});
+
 server.listen(PORT, () => {
   const info = api.tokenInfo();
   console.log(`\n  InkPoster Desktop  →  http://localhost:${PORT}\n`);
