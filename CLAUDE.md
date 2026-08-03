@@ -117,14 +117,30 @@ and `samsung_EMDX_784r.md` files in the root — always stage files explicitly
   `sleep` is blocked.
 - **After code changes:** restart `npm start` (server) AND hard-refresh the browser
   (Ctrl+Shift+R) — `public/*` is cached.
+- **KILL any server you background before ending the session** (`netstat -ano |
+  grep :4173` → `taskkill //PID <pid> //F`). A leftover instance holds the port and
+  John's `start-inkposter.bat` hits EADDRINUSE (now a friendly message, but still
+  confusing). John normally runs the server himself via the .bat.
 - To verify UI without live devices, inject mock frames via the browser
   `javascript_tool` and call the render functions. To test file uploads without a
   native picker, `fetch` a file staged in `public/`, wrap it in a `File` +
   `DataTransfer`, assign to the input's `.files`, and dispatch `change`.
-- Test assets for the image loader (real ProRAW .dng from raw.pixls.us, HEIC from
-  nokiatech) download fine with curl — see the Aug 2026 HEIC/DNG commit message.
+- Test assets for the image loader (real ProRAW .dng from raw.pixls.us — JSON
+  index at `/json/getrepository.php?set=all` — and HEIC from nokiatech's gh-pages)
+  download fine with curl.
+- **Debugging what actually went to a frame:** `server/cache/<itemId>.jpg` holds
+  the exact uploaded bytes of every photo push — first thing to inspect for
+  orientation/quality complaints. `/api/image-status` shows per-frame transfer
+  progress (`progress`, `sentToEpd`). A server-side re-push + `/api/ble/fetch`
+  (name `InkP-<serial>` + sharedKey from `/api/frames`) makes a test visible on
+  the wall in ~1 min without touching the UI.
 
 ## Open items / possible next steps
+- **28.5" Tela in portrait**: `panelFix` predicts net 0° (inverted mount + portrait
+  180 cancel) — never observed. If a portrait push to the Tela lands upside-down,
+  that prediction is the thing to fix.
+- Older third-party-app DNGs may embed only a small preview (~850px) → soft
+  output. Upgrade path if it ever matters: LibRaw WASM demosaic.
 - Deferred/nice-to-have: bind the server to `127.0.0.1` + Origin check (currently
   binds all interfaces); "My Images" gallery for private uploads (needs a capture
   of the app's private-images endpoint, `getPrivateImagesWithCropParamsFlow`);
